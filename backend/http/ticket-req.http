@@ -1,0 +1,22 @@
+@baseUrl = http://localhost:5000
+
+### login as employee first (run auth-req.http login), then:
+
+### list categories to get a categoryId
+GET {{baseUrl}}/meta-api/categories
+
+### create ticket
+POST {{baseUrl}}/ticket-api/tickets
+Content-Type: application/json
+
+{
+  "title": "Laptop won't turn on",
+  "description": "Pressed power button, no lights, tried charger swap.",
+  "categoryId": "PASTE_CATEGORY_ID"
+}
+
+### list my tickets
+GET {{baseUrl}}/ticket-api/tickets
+
+### get one ticket
+GET {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID

@@ -1,0 +1,29 @@
+@baseUrl = http://localhost:5000
+
+### register (employee)
+POST {{baseUrl}}/auth/users
+Content-Type: application/json
+
+{
+  "firstName": "Test",
+  "lastName": "User",
+  "email": "testuser@sdp.test",
+  "password": "Passw0rd!",
+  "department": "PASTE_ENG_DEPARTMENT_ID"
+}
+
+### login as seeded employee
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "employee@sdp.test",
+  "password": "Passw0rd!"
+}
+
+### check-auth (cookie sent automatically by the REST client)
+GET {{baseUrl}}/auth/check-auth
+
+### logout
+GET {{baseUrl}}/auth/logout
