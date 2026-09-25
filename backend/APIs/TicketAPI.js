@@ -231,12 +231,24 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       }
     }
     if (action === 'assign' || action === 'reassign') {
-      if (!technicianId) { return res.status(400).json({ message: 'technicianId is required' }) }
+      if (!technicianId) {
+        //send res
+        return res.status(400).json({ message: 'technicianId is required' })
+      }
+      const technician = await UserModel.findOne({ _id: technicianId, role: 'TECHNICIAN', isActive: true })
+      if (!technician) {
+        //send res
+        return res.status(400).json({ message: 'technicianId must be an active technician' })
+      }
+      if (req.user.role !== 'ADMIN' && technician.department?.toString() !== ticket.department.toString()) {
+        //send res
+        return res.status(400).json({ message: "technician must belong to the ticket's department" })
+      }
       const previousAssignee = ticket.assignedTo
-      ticket.assignedTo = technicianId
+      ticket.assignedTo = technician._id
       ticket.assignedBy = req.user.id
       ticket.assignedAt = new Date()
-      await createNotification({ user: technicianId, type: 'TICKET_ASSIGNED', message: `Ticket ${ticket.publicId} was assigned to you`, link: `/tickets/${ticket.publicId}` })
+      await createNotification({ user: technician._id, type: 'TICKET_ASSIGNED', message: `Ticket ${ticket.publicId} was assigned to you`, link: `/tickets/${ticket.publicId}` })
       if (action === 'reassign' && previousAssignee && previousAssignee.toString() !== technicianId) {
         await createNotification({ user: previousAssignee, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was reassigned to someone else`, link: `/tickets/${ticket.publicId}` })
       }
