@@ -1,8 +1,8 @@
 import { Schema, model, Types } from 'mongoose'
 
-// MVP ticket: core CRUD + lifecycle + simple (wall-clock) SLA due dates.
-// The full business-hours SLA engine, approvals, watchers and linked
-// tickets are scoped for a later phase — see PLAN.md Phase 3-5.
+// Phase 2: approvals + the full Section 6b status matrix (minus linked
+// tickets/watchers, which stay in Phase 6, and business-hours SLA math,
+// which is Phase 3 — ON_HOLD here just pauses on wall-clock time for now).
 
 const commentSchema = new Schema({
   author:     { type: Types.ObjectId, ref: 'user', required: true },
@@ -36,13 +36,27 @@ const ticketSchema = new Schema({
 
   status: {
     type: String,
-    enum: ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED', 'CLOSED', 'REOPENED', 'CANCELLED'],
+    enum: ['PENDING_APPROVAL', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'RESOLVED', 'CLOSED', 'REOPENED', 'REJECTED', 'CANCELLED'],
     default: 'OPEN',
   },
 
   assignedTo: { type: Types.ObjectId, ref: 'user' },
   assignedBy: { type: Types.ObjectId, ref: 'user' },
   assignedAt: { type: Date },
+
+  approval: {
+    approvedBy: { type: Types.ObjectId, ref: 'user' },
+    approvedAt: { type: Date },
+    rejectedBy: { type: Types.ObjectId, ref: 'user' },
+    rejectedAt: { type: Date },
+    rejectionReason: { type: String },
+  },
+
+  cancellation: {
+    cancelledBy: { type: Types.ObjectId, ref: 'user' },
+    cancelledAt: { type: Date },
+    reason: { type: String },
+  },
 
   comments:       [commentSchema],
   statusHistory:  [statusHistorySchema],
@@ -53,6 +67,8 @@ const ticketSchema = new Schema({
     firstRespondedAt: { type: Date },
     responseBreached:   { type: Boolean, default: false },
     resolutionBreached: { type: Boolean, default: false },
+    pausedAt:           { type: Date },      // set while ON_HOLD
+    totalPausedMs:      { type: Number, default: 0 },
   },
 
   resolution: {
@@ -63,8 +79,9 @@ const ticketSchema = new Schema({
     confirmedAt:        { type: Date },
   },
 
-  version:   { type: Number, default: 0 }, // optimistic concurrency guard
-  isDeleted: { type: Boolean, default: false },
+  reopenCount: { type: Number, default: 0 },
+  version:     { type: Number, default: 0 }, // optimistic concurrency guard
+  isDeleted:   { type: Boolean, default: false },
 }, {
   versionKey: false,
   timestamps: true,

@@ -21,7 +21,7 @@ export const CreateTicket = () => {
     setLoading(true)
     try {
       const { data } = await axiosInstance.post('/ticket-api/tickets', form)
-      toast.success(`Ticket ${data.payload.publicId} created`)
+      toast.success(data.payload.status === 'PENDING_APPROVAL' ? `Ticket ${data.payload.publicId} submitted for approval` : `Ticket ${data.payload.publicId} created`)
       navigate(`/tickets/${data.payload.publicId}`)
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to create ticket')

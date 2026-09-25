@@ -21,12 +21,15 @@ export const styles = {
 }
 
 export const statusColors = {
+  PENDING_APPROVAL: 'bg-yellow-100 text-yellow-700',
   OPEN: 'bg-blue-100 text-blue-700',
   ASSIGNED: 'bg-purple-100 text-purple-700',
   IN_PROGRESS: 'bg-amber-100 text-amber-700',
+  ON_HOLD: 'bg-orange-100 text-orange-700',
   RESOLVED: 'bg-teal-100 text-teal-700',
   CLOSED: 'bg-slate-200 text-slate-600',
   REOPENED: 'bg-orange-100 text-orange-700',
+  REJECTED: 'bg-red-100 text-red-700',
   CANCELLED: 'bg-slate-100 text-slate-400',
 }
 

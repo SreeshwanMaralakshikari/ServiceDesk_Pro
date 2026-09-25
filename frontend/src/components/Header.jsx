@@ -21,6 +21,7 @@ export const Header = () => {
           {isAuthenticated ? (
             <>
               <Link to="/tickets" className={styles.navLink}>My Tickets</Link>
+              {(user?.role === 'MANAGER' || user?.role === 'ADMIN') && <Link to="/approvals" className={styles.navLink}>Approvals</Link>}
               {user?.role === 'ADMIN' && <Link to="/admin" className={styles.navLink}>Admin</Link>}
               <span className="text-sm text-slate-400">{user?.firstName} · {user?.role}</span>
               <button onClick={handleLogout} className={styles.btnSecondary}>Logout</button>

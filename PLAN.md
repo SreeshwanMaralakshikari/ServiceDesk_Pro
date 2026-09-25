@@ -5,12 +5,29 @@ scope/features) and the MERN Toolkit (authoritative on code style — auth
 transport, response envelope, folder layout, bug checklist). This plan adapts
 both into a realistic solo-developer sequence, starting from today's MVP.
 
-## Where things stand after Day 1
+## Where things stand after Day 1 + Phase 2
 Delivered: backend (auth, RBAC, Department/Category/SLAPolicy/Ticket/Notification
-models, ticket lifecycle with optimistic concurrency, comments with internal-note
-visibility rules, admin CRUD + dashboard, seed script) and a working frontend
-(login/register, ticket list/create/detail with role-aware actions, admin stats).
-Deployable to Render + Vercel as-is. Full detail in `README.md`.
+models, the full Section 6b ticket-status matrix minus linked-tickets/watchers,
+approvals workflow, comments with internal-note visibility rules, admin CRUD +
+dashboard, seed script) and a working frontend (login/register, ticket
+list/create/detail with role-aware actions, an Approvals inbox for
+Manager/Admin, admin stats). Deployable to Render + Vercel as-is. Full detail
+in `README.md`.
+
+**Phase 2 — done.** `PENDING_APPROVAL`/`REJECTED`/`ON_HOLD` added to the
+status enum; categories with `requiresApproval` now hold new tickets in
+`PENDING_APPROVAL` (no SLA clock running) until a team Manager approves or
+rejects them via `PATCH /tickets/:id/approve|reject`; `ticketTransitions.js`
+now carries the full matrix (approve, reject, cancel, assign, claim,
+reassign, start, hold, resume, resolve, confirm, reopen) with per-action role
++ ownership checks, a required-note rule for reject/cancel/hold/reopen, and
+the 7-day reopen window on `CLOSED` tickets. `ON_HOLD` pauses the SLA clock
+on wall-clock time for now — the business-hours version is still Phase 3.
+Also fixed along the way: `start`/`resolve` previously didn't check the
+caller was the *assigned* technician (any tech on the team could act on
+someone else's ticket) — now enforced; `reopenCount` was being set on the
+in-memory document but was never in the schema, so it silently never
+persisted — now a real field.
 
 ## Guiding rules (kept from the handoff plan)
 - Toolkit wins on *style*: ES modules, cookie JWT, `{ message, payload }`
@@ -25,19 +42,14 @@ Deployable to Render + Vercel as-is. Full detail in `README.md`.
 
 ## Remaining phases
 
-**Phase 2 — Approvals & full transition matrix**
-Add `PENDING_APPROVAL` state, `requiresApproval` categories, Manager
-approve/reject routes and inbox. Expand `ticketTransitions.js` from today's
-7-action subset to the full Section 6b table (linked tickets, watchers stay
-in Phase 6 as stretch). *Done when:* a Service Request created in an
-approval-required category sits in `PENDING_APPROVAL` until a team Manager
-approves it, and the SLA clock only starts then.
-
 **Phase 3 — Real SLA engine**
 `utils/businessHours.js` (IST business hours, +05:30 fixed offset per the
 handoff plan's timezone note), `utils/evaluateSla.js`, `jobs/slaChecker.js`
-(node-cron, 5 min) + lazy check on fetch, ON_HOLD pause/resume, warning/breach/
-escalation notifications, SLA badge in the UI. *Done when:* a test policy with
+(node-cron, 5 min) + lazy check on fetch, ON_HOLD pause/resume (upgrading
+Phase 2's wall-clock version to real business hours), warning/breach/
+escalation notifications, SLA badge in the UI, and the priority-change route
+(deferred here since it needs the same due-date recalculation math).
+*Done when:* a test policy with
 `businessHoursOnly:false` visibly moves a ticket from on-track → at-risk →
 breached, and re-running the checker never double-notifies.
 

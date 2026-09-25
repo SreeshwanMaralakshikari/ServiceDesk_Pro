@@ -20,3 +20,57 @@ GET {{baseUrl}}/ticket-api/tickets
 
 ### get one ticket
 GET {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID
+
+### --- Phase 2: approvals ---
+
+### create a ticket in an approval-required category (login as employee first)
+POST {{baseUrl}}/ticket-api/tickets
+Content-Type: application/json
+
+{
+  "title": "Need a second monitor",
+  "description": "Requesting a second monitor for my desk.",
+  "categoryId": "PASTE_NEW_HARDWARE_REQUEST_CATEGORY_ID"
+}
+
+### login as manager (run auth-req.http with manager@sdp.test), then list pending approvals
+GET {{baseUrl}}/ticket-api/tickets?status=PENDING_APPROVAL
+
+### approve it
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/approve
+Content-Type: application/json
+
+{}
+
+### ...or reject it (note is required)
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/reject
+Content-Type: application/json
+
+{
+  "note": "Please use the shared spare-monitor pool instead."
+}
+
+### list technicians in your team (manager/admin only)
+GET {{baseUrl}}/ticket-api/team-technicians
+
+### put an in-progress ticket on hold (login as the assigned technician)
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/hold
+Content-Type: application/json
+
+{
+  "note": "Waiting on a replacement part from the vendor."
+}
+
+### resume it
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/resume
+Content-Type: application/json
+
+{}
+
+### reassign to a different technician (manager/admin)
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/reassign
+Content-Type: application/json
+
+{
+  "technicianId": "PASTE_OTHER_TECHNICIAN_ID"
+}

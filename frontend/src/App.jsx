@@ -9,6 +9,7 @@ import { NotFound } from './components/NotFound.jsx'
 import { TicketList } from './components/tickets/TicketList.jsx'
 import { CreateTicket } from './components/tickets/CreateTicket.jsx'
 import { TicketDetail } from './components/tickets/TicketDetail.jsx'
+import { ApprovalsInbox } from './components/tickets/ApprovalsInbox.jsx'
 import { AdminDashboard } from './components/admin/AdminDashboard.jsx'
 
 export const router = createBrowserRouter([
@@ -27,6 +28,12 @@ export const router = createBrowserRouter([
           { path: 'tickets', element: <TicketList /> },
           { path: 'tickets/new', element: <CreateTicket /> },
           { path: 'tickets/:ticketId', element: <TicketDetail /> },
+        ],
+      },
+      {
+        element: <ProtectedRoutes allowedRoles={['MANAGER', 'ADMIN']} />,
+        children: [
+          { path: 'approvals', element: <ApprovalsInbox /> },
         ],
       },
       {

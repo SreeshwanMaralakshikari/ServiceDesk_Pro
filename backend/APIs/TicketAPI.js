@@ -8,14 +8,31 @@ import { generateSequentialId } from '../utils/generateSequentialId.js'
 import { computeSlaDueDates } from '../utils/slaHelper.js'
 import { buildTicketQuery } from '../utils/buildTicketQuery.js'
 import { idOrPublicIdFilter } from '../utils/findByIdOrPublicId.js'
-import { isTransitionAllowed } from '../utils/ticketTransitions.js'
-import { createNotification } from '../utils/createNotification.js'
+import { isTransitionAllowed, REQUESTER_ONLY_ACTIONS, TEAM_SCOPED_ACTIONS, REOPEN_WINDOW_DAYS } from '../utils/ticketTransitions.js'
+import { createNotification, notifyMany } from '../utils/createNotification.js'
 
 export const ticketApp = exp.Router()
 
 const ALL_ROLES = ['ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOYEE', 'ASSET_MANAGER']
 
+// staffing helper for the Manager/Admin assign & reassign UI — active
+// technicians in the caller's own team (Admin may pass ?department=)
+ticketApp.get('/team-technicians', verifyToken('MANAGER', 'ADMIN'), async (req, res, next) => {
+  try {
+    const department = req.user.role === 'ADMIN' ? req.query.department : req.user.department
+    const filter = { role: 'TECHNICIAN', isActive: true }
+    if (department) filter.department = department
+    const technicians = await UserModel.find(filter).select('firstName lastName email department')
+    //send res
+    res.status(200).json({ message: 'technicians fetched', payload: technicians })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // create — EMPLOYEE (or ADMIN, for seed/demo convenience)
+// categories with requiresApproval land in PENDING_APPROVAL with no SLA
+// clock yet; everything else opens straight into OPEN with SLA running.
 ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, next) => {
   try {
     // destructure known fields only — never new Model(req.body)
@@ -33,11 +50,17 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
 
     const requester = await UserModel.findById(req.user.id)
     const finalPriority = priority || category.defaultPriority
-    const policy = await SLAPolicyModel.findOne({ priority: finalPriority, isActive: true })
-
     const publicId = await generateSequentialId(TicketModel, 'TKT')
-    const startedAt = new Date()
-    const sla = computeSlaDueDates(startedAt, policy)
+    const needsApproval = Boolean(category.requiresApproval)
+
+    let status = 'OPEN'
+    let sla = {}
+    if (!needsApproval) {
+      const policy = await SLAPolicyModel.findOne({ priority: finalPriority, isActive: true })
+      sla = computeSlaDueDates(new Date(), policy)
+    } else {
+      status = 'PENDING_APPROVAL'
+    }
 
     const ticket = await TicketModel.create({
       publicId,
@@ -49,19 +72,29 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
       department: category.department,
       category: category._id,
       priority: finalPriority,
-      status: 'OPEN',
+      status,
       sla,
-      statusHistory: [{ to: 'OPEN', by: requester._id, note: 'ticket created' }],
+      statusHistory: [{ to: status, by: requester._id, note: needsApproval ? 'ticket created — awaiting approval' : 'ticket created' }],
     })
 
+    if (needsApproval) {
+      const managers = await UserModel.find({ role: 'MANAGER', department: category.department, isActive: true }).select('_id')
+      await notifyMany(managers.map((m) => m._id), {
+        type: 'APPROVAL_REQUESTED',
+        message: `Ticket ${ticket.publicId} needs your approval`,
+        link: `/tickets/${ticket.publicId}`,
+      })
+    }
+
     //send res
-    res.status(201).json({ message: 'ticket created', payload: ticket })
+    res.status(201).json({ message: needsApproval ? 'ticket submitted for approval' : 'ticket created', payload: ticket })
   } catch (err) {
     next(err)
   }
 })
 
-// list — role-scoped, paginated, filterable
+// list — role-scoped, paginated, filterable (also used for the
+// Manager/Admin "Approvals" inbox via ?status=PENDING_APPROVAL)
 ticketApp.get('/tickets', verifyToken(...ALL_ROLES), async (req, res, next) => {
   try {
     const { page = 1, limit = 20, status, priority, category, q } = req.query
@@ -116,7 +149,9 @@ ticketApp.get('/tickets/:ticketId', verifyToken(...ALL_ROLES), async (req, res, 
   }
 })
 
-// status transitions: assign / claim / start / resolve / confirm / reopen / cancel
+// status transitions — approve / reject / cancel / assign / claim / reassign
+// / start / hold / resume / resolve / confirm / reopen (full Section 6b
+// matrix, minus linked-ticket/duplicate closing and watchers — Phase 6)
 ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (req, res, next) => {
   try {
     const { ticketId, action } = req.params
@@ -134,15 +169,36 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       return res.status(check.reason.includes('authorized') ? 403 : 400).json({ message: check.reason })
     }
 
+    // extra reopen guard: a CLOSED ticket can only be reopened within
+    // REOPEN_WINDOW_DAYS of confirmation (RESOLVED has no such window)
+    if (action === 'reopen' && ticket.status === 'CLOSED') {
+      const closedAt = ticket.resolution?.confirmedAt
+      const withinWindow = closedAt && (Date.now() - closedAt.getTime()) <= REOPEN_WINDOW_DAYS * 24 * 60 * 60 * 1000
+      if (!withinWindow) {
+        //send res
+        return res.status(400).json({ message: `this ticket was closed more than ${REOPEN_WINDOW_DAYS} days ago and can no longer be reopened — please raise a new ticket` })
+      }
+    }
+
+    if (check.requiresNote && !note) {
+      //send res
+      return res.status(400).json({ message: `a note is required for ${action}` })
+    }
+
     // requester-only actions must belong to the requester
-    if (['confirm', 'reopen', 'cancel'].includes(action) && req.user.role === 'EMPLOYEE' && ticket.requester.toString() !== req.user.id) {
+    if (REQUESTER_ONLY_ACTIONS.includes(action) && req.user.role === 'EMPLOYEE' && ticket.requester.toString() !== req.user.id) {
       //send res
       return res.status(403).json({ message: 'this is not your ticket' })
     }
     // team-scoped actions must match the ticket's department
-    if (['assign', 'claim', 'start'].includes(action) && req.user.role !== 'ADMIN' && req.user.department !== ticket.department.toString()) {
+    if (TEAM_SCOPED_ACTIONS.includes(action) && req.user.role !== 'ADMIN' && req.user.department !== ticket.department.toString()) {
       //send res
       return res.status(403).json({ message: 'this ticket belongs to a different team' })
+    }
+    // actions that only the assigned technician may perform
+    if (check.assigneeOnly && req.user.role === 'TECHNICIAN' && ticket.assignedTo?.toString() !== req.user.id) {
+      //send res
+      return res.status(403).json({ message: 'only the assigned technician can do this' })
     }
 
     if (typeof version === 'number' && version !== ticket.version) {
@@ -151,16 +207,39 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
     }
 
     const from = ticket.status
-    ticket.status = check.to
+    if (check.to !== null) ticket.status = check.to
     ticket.version += 1
-    ticket.statusHistory.push({ from, to: check.to, by: req.user.id, note })
+    ticket.statusHistory.push({ from, to: check.to ?? from, by: req.user.id, note })
 
-    if (action === 'assign') {
+    if (action === 'approve') {
+      const policy = await SLAPolicyModel.findOne({ priority: ticket.priority, isActive: true })
+      ticket.sla = { ...ticket.sla, ...computeSlaDueDates(new Date(), policy) }
+      ticket.approval.approvedBy = req.user.id
+      ticket.approval.approvedAt = new Date()
+      await createNotification({ user: ticket.requester, type: 'TICKET_APPROVED', message: `Ticket ${ticket.publicId} was approved and is now open`, link: `/tickets/${ticket.publicId}` })
+    }
+    if (action === 'reject') {
+      ticket.approval.rejectedBy = req.user.id
+      ticket.approval.rejectedAt = new Date()
+      ticket.approval.rejectionReason = note
+      await createNotification({ user: ticket.requester, type: 'TICKET_REJECTED', message: `Ticket ${ticket.publicId} was rejected: ${note}`, link: `/tickets/${ticket.publicId}` })
+    }
+    if (action === 'cancel') {
+      ticket.cancellation = { cancelledBy: req.user.id, cancelledAt: new Date(), reason: note }
+      if (ticket.assignedTo) {
+        await createNotification({ user: ticket.assignedTo, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was cancelled`, link: `/tickets/${ticket.publicId}` })
+      }
+    }
+    if (action === 'assign' || action === 'reassign') {
       if (!technicianId) { return res.status(400).json({ message: 'technicianId is required' }) }
+      const previousAssignee = ticket.assignedTo
       ticket.assignedTo = technicianId
       ticket.assignedBy = req.user.id
       ticket.assignedAt = new Date()
       await createNotification({ user: technicianId, type: 'TICKET_ASSIGNED', message: `Ticket ${ticket.publicId} was assigned to you`, link: `/tickets/${ticket.publicId}` })
+      if (action === 'reassign' && previousAssignee && previousAssignee.toString() !== technicianId) {
+        await createNotification({ user: previousAssignee, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was reassigned to someone else`, link: `/tickets/${ticket.publicId}` })
+      }
     }
     if (action === 'claim') {
       ticket.assignedTo = req.user.id
@@ -169,6 +248,16 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
     }
     if (action === 'start' && !ticket.sla.firstRespondedAt) {
       ticket.sla.firstRespondedAt = new Date()
+    }
+    if (action === 'hold') {
+      ticket.sla.pausedAt = new Date()
+    }
+    if (action === 'resume' && ticket.sla.pausedAt) {
+      const pausedMs = Date.now() - ticket.sla.pausedAt.getTime()
+      if (ticket.sla.responseDueAt) ticket.sla.responseDueAt = new Date(ticket.sla.responseDueAt.getTime() + pausedMs)
+      if (ticket.sla.resolutionDueAt) ticket.sla.resolutionDueAt = new Date(ticket.sla.resolutionDueAt.getTime() + pausedMs)
+      ticket.sla.totalPausedMs = (ticket.sla.totalPausedMs || 0) + pausedMs
+      ticket.sla.pausedAt = undefined
     }
     if (action === 'resolve') {
       if (!resolutionSummary) { return res.status(400).json({ message: 'resolutionSummary is required' }) }
@@ -182,9 +271,16 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       ticket.resolution.confirmedAt = new Date()
     }
     if (action === 'reopen') {
+      // new SLA cycle — same-priority policy, wall-clock due dates from now
+      const policy = await SLAPolicyModel.findOne({ priority: ticket.priority, isActive: true })
+      const { resolutionDueAt } = computeSlaDueDates(new Date(), policy)
       ticket.reopenCount = (ticket.reopenCount || 0) + 1
+      ticket.sla.resolutionDueAt = resolutionDueAt
+      ticket.sla.resolutionBreached = false
+      ticket.sla.totalPausedMs = 0
+      ticket.resolution = { summary: undefined, resolvedBy: undefined, resolvedAt: undefined, confirmedByRequester: false, confirmedAt: undefined }
       if (ticket.assignedTo) {
-        await createNotification({ user: ticket.assignedTo, type: 'TICKET_REOPENED', message: `Ticket ${ticket.publicId} was reopened`, link: `/tickets/${ticket.publicId}` })
+        await createNotification({ user: ticket.assignedTo, type: 'TICKET_REOPENED', message: `Ticket ${ticket.publicId} was reopened: ${note}`, link: `/tickets/${ticket.publicId}` })
       }
     }
 

@@ -48,9 +48,11 @@ app.use('/ticket-api', ticketApp)
 app.use('/admin-api', adminApp)
 app.use('/notification-api', notificationApp)
 
-const connectDB = async () => {
+const connectDB = async (attempt = 1) => {
+  const maxAttempts = 8
+  const delayMs = Math.min(30000, 2000 * attempt) // backs off up to 30s between tries
   try {
-    await connect(process.env.MONGO_URI)
+    await connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 10000 })
     console.log('DB connected')
     if (process.env.SEED_ON_START === 'true') {
       await seedIfEmpty()
@@ -58,8 +60,13 @@ const connectDB = async () => {
     const port = process.env.PORT || 5000
     app.listen(port, () => console.log(`server listening on ${port}...`))
   } catch (err) {
-    console.log('err in db connect', err.message)
-    process.exit(1)
+    console.log(`err in db connect (attempt ${attempt}/${maxAttempts}):`, err.message)
+    if (attempt >= maxAttempts) {
+      console.log('giving up after repeated failures — check MONGO_URI, Atlas Network Access, and your network/firewall (see PLAN.md / README.md troubleshooting notes)')
+      process.exit(1)
+    }
+    console.log(`retrying in ${delayMs / 1000}s...`)
+    setTimeout(() => connectDB(attempt + 1), delayMs)
   }
 }
 connectDB()
