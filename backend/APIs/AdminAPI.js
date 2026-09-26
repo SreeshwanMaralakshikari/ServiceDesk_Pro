@@ -4,6 +4,7 @@ import { DepartmentModel } from '../models/DepartmentModel.js'
 import { CategoryModel } from '../models/CategoryModel.js'
 import { SLAPolicyModel } from '../models/SLAPolicyModel.js'
 import { TicketModel } from '../models/TicketModel.js'
+import { getOrgSettings } from '../models/OrgSettingsModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
 
 export const adminApp = exp.Router()
@@ -91,8 +92,8 @@ adminApp.patch('/categories/:categoryId', async (req, res, next) => {
 // --- SLA policies (also the priority master) ---
 adminApp.post('/sla-policies', async (req, res, next) => {
   try {
-    const { priority, label, level, color, responseTimeHours, resolutionTimeHours } = req.body
-    const policy = await SLAPolicyModel.create({ priority, label, level, color, responseTimeHours, resolutionTimeHours })
+    const { priority, label, level, color, responseTimeHours, resolutionTimeHours, businessHoursOnly } = req.body
+    const policy = await SLAPolicyModel.create({ priority, label, level, color, responseTimeHours, resolutionTimeHours, businessHoursOnly })
     //send res
     res.status(201).json({ message: 'SLA policy created', payload: policy })
   } catch (err) { next(err) }
@@ -100,9 +101,14 @@ adminApp.post('/sla-policies', async (req, res, next) => {
 
 adminApp.patch('/sla-policies/:policyId', async (req, res, next) => {
   try {
-    const { label, color, responseTimeHours, resolutionTimeHours, isActive } = req.body
+    const { label, color, responseTimeHours, resolutionTimeHours, businessHoursOnly, isActive } = req.body
     if (isActive === false) {
-      const inUse = await TicketModel.exists({ priority: (await SLAPolicyModel.findById(req.params.policyId)).priority, status: { $nin: ['CLOSED', 'CANCELLED'] } })
+      const target = await SLAPolicyModel.findById(req.params.policyId)
+      const inUse = await TicketModel.exists({
+        isDeleted: false,
+        priority: target?.priority,
+        status: { $nin: ['CLOSED', 'CANCELLED', 'REJECTED'] },
+      })
       if (inUse) {
         //send res
         return res.status(409).json({ message: 'cannot deactivate a priority still used by open tickets' })
@@ -110,11 +116,37 @@ adminApp.patch('/sla-policies/:policyId', async (req, res, next) => {
     }
     const policy = await SLAPolicyModel.findByIdAndUpdate(
       req.params.policyId,
-      { label, color, responseTimeHours, resolutionTimeHours, isActive },
+      { label, color, responseTimeHours, resolutionTimeHours, businessHoursOnly, isActive },
       { new: true, runValidators: true }
     )
     //send res
     res.status(200).json({ message: 'SLA policy updated', payload: policy })
+  } catch (err) { next(err) }
+})
+
+// --- org settings (business hours) ---
+adminApp.get('/org-settings', async (req, res, next) => {
+  try {
+    const settings = await getOrgSettings()
+    //send res
+    res.status(200).json({ message: 'org settings fetched', payload: settings })
+  } catch (err) { next(err) }
+})
+
+adminApp.put('/org-settings', async (req, res, next) => {
+  try {
+    const { orgName, businessHours } = req.body
+    const settings = await getOrgSettings()
+    if (orgName !== undefined) settings.orgName = orgName
+    if (businessHours) {
+      if (businessHours.days !== undefined) settings.businessHours.days = businessHours.days
+      if (businessHours.start !== undefined) settings.businessHours.start = businessHours.start
+      if (businessHours.end !== undefined) settings.businessHours.end = businessHours.end
+      // timezone is fixed to Asia/Kolkata (+05:30) — see utils/businessHours.js
+    }
+    await settings.save()
+    //send res
+    res.status(200).json({ message: 'org settings updated', payload: settings })
   } catch (err) { next(err) }
 })
 

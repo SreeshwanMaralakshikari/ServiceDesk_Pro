@@ -12,6 +12,7 @@ import { adminApp } from './APIs/AdminAPI.js'
 import { notificationApp } from './APIs/NotificationAPI.js'
 import { seedIfEmpty } from './utils/seedData.js'
 import { sanitizeBody } from './middlewares/sanitize.js'
+import { startSlaChecker } from './jobs/slaChecker.js'
 
 config()
 
@@ -59,6 +60,7 @@ const connectDB = async (attempt = 1) => {
     }
     const port = process.env.PORT || 5000
     app.listen(port, () => console.log(`server listening on ${port}...`))
+    startSlaChecker() // only after the DB connection is confirmed live
   } catch (err) {
     console.log(`err in db connect (attempt ${attempt}/${maxAttempts}):`, err.message)
     if (attempt >= maxAttempts) {

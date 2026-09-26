@@ -7,6 +7,7 @@ const slaPolicySchema = new Schema({
   color:               { type: String, default: '#6b7280' },
   responseTimeHours:   { type: Number, required: [true, 'Response time is required'] },
   resolutionTimeHours: { type: Number, required: [true, 'Resolution time is required'] },
+  businessHoursOnly:   { type: Boolean, default: true }, // false = plain wall-clock (handy for demos/tests)
   isActive:            { type: Boolean, default: true },
 }, {
   versionKey: false,

@@ -62,13 +62,19 @@ const ticketSchema = new Schema({
   statusHistory:  [statusHistorySchema],
 
   sla: {
+    policy:           { type: Types.ObjectId, ref: 'slapolicy' },
+    startedAt:        { type: Date },  // start of the *current* cycle — reset on reopen
     responseDueAt:    { type: Date },
     resolutionDueAt:  { type: Date },
     firstRespondedAt: { type: Date },
     responseBreached:   { type: Boolean, default: false },
     resolutionBreached: { type: Boolean, default: false },
+    warnAt:             { type: Date },              // 75% point of the resolution window
+    warningSent:        { type: Boolean, default: false },
+    escalationLevel:    { type: Number, default: 0 }, // 0=none, 1=response breach, 2=resolution breach
+    pastBreaches:       { type: Number, default: 0 }, // resolution breaches from earlier reopen cycles
     pausedAt:           { type: Date },      // set while ON_HOLD
-    totalPausedMs:      { type: Number, default: 0 },
+    totalPausedMs:      { type: Number, default: 0 }, // business-time ms for the current cycle
   },
 
   resolution: {
@@ -91,6 +97,7 @@ const ticketSchema = new Schema({
 ticketSchema.index({ status: 1, department: 1, priority: 1 })
 ticketSchema.index({ assignedTo: 1, status: 1 })
 ticketSchema.index({ requester: 1 })
+ticketSchema.index({ status: 1, 'sla.resolutionDueAt': 1 }) // for the SLA checker's query
 ticketSchema.index({ title: 'text', description: 'text' })
 
 export const TicketModel = model('ticket', ticketSchema)

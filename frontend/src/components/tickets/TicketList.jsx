@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { axiosInstance } from '../../axiosInstance.js'
 import { styles, statusColors, priorityColors } from '../../styles/common.js'
+import { getSlaStatus } from '../../utils/sla.js'
 
 export const TicketList = () => {
   const [items, setItems] = useState([])
@@ -35,18 +36,23 @@ export const TicketList = () => {
                 <th className="py-2">Category</th>
                 <th className="py-2">Priority</th>
                 <th className="py-2">Status</th>
+                <th className="py-2">SLA</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((t) => (
-                <tr key={t._id} className={styles.tableRow} onClick={() => navigate(`/tickets/${t.publicId}`)}>
-                  <td className="py-2 font-mono text-xs">{t.publicId}</td>
-                  <td className="py-2">{t.title}</td>
-                  <td className="py-2">{t.category?.name}</td>
-                  <td className="py-2"><span className={`${styles.badge} ${priorityColors[t.priority] || ''}`}>{t.priority}</span></td>
-                  <td className="py-2"><span className={`${styles.badge} ${statusColors[t.status] || ''}`}>{t.status}</span></td>
-                </tr>
-              ))}
+              {items.map((t) => {
+                const sla = getSlaStatus(t)
+                return (
+                  <tr key={t._id} className={styles.tableRow} onClick={() => navigate(`/tickets/${t.publicId}`)}>
+                    <td className="py-2 font-mono text-xs">{t.publicId}</td>
+                    <td className="py-2">{t.title}</td>
+                    <td className="py-2">{t.category?.name}</td>
+                    <td className="py-2"><span className={`${styles.badge} ${priorityColors[t.priority] || ''}`}>{t.priority}</span></td>
+                    <td className="py-2"><span className={`${styles.badge} ${statusColors[t.status] || ''}`}>{t.status}</span></td>
+                    <td className="py-2">{sla ? <span className={`${styles.badge} ${sla.className}`}>{sla.label}</span> : <span className="text-slate-300 text-xs">—</span>}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}

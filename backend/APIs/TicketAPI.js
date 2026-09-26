@@ -5,7 +5,10 @@ import { SLAPolicyModel } from '../models/SLAPolicyModel.js'
 import { UserModel } from '../models/UserModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
 import { generateSequentialId } from '../utils/generateSequentialId.js'
-import { computeSlaDueDates } from '../utils/slaHelper.js'
+import { getOrgSettings } from '../models/OrgSettingsModel.js'
+import { startSlaClock, recomputeSlaForPriorityChange } from '../utils/slaLifecycle.js'
+import { elapsedMs } from '../utils/businessHours.js'
+import { evaluateTicketSla, evaluateManyTicketsSla } from '../utils/evaluateSla.js'
 import { buildTicketQuery } from '../utils/buildTicketQuery.js'
 import { idOrPublicIdFilter } from '../utils/findByIdOrPublicId.js'
 import { isTransitionAllowed, REQUESTER_ONLY_ACTIONS, TEAM_SCOPED_ACTIONS, REOPEN_WINDOW_DAYS } from '../utils/ticketTransitions.js'
@@ -57,7 +60,8 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
     let sla = {}
     if (!needsApproval) {
       const policy = await SLAPolicyModel.findOne({ priority: finalPriority, isActive: true })
-      sla = computeSlaDueDates(new Date(), policy)
+      const settings = await getOrgSettings()
+      sla = { ...startSlaClock(new Date(), policy, settings.businessHours), policy: policy?._id }
     } else {
       status = 'PENDING_APPROVAL'
     }
@@ -117,6 +121,11 @@ ticketApp.get('/tickets', verifyToken(...ALL_ROLES), async (req, res, next) => {
       message: 'tickets fetched',
       payload: { items, total, page: Number(page), totalPages: Math.ceil(total / limit) },
     })
+
+    // lazy SLA check — fire after responding so it never adds latency to
+    // the request; Render's free tier sleeps, so this (plus the cron) is
+    // what actually catches breaches on a service that was just asleep
+    evaluateManyTicketsSla(items).catch((err) => console.log('lazy SLA check (list) failed:', err.message))
   } catch (err) {
     next(err)
   }
@@ -142,8 +151,72 @@ ticketApp.get('/tickets/:ticketId', verifyToken(...ALL_ROLES), async (req, res, 
     const visible = ticket.toObject()
     if (!isStaff) visible.comments = visible.comments.filter((c) => !c.isInternal)
 
+    // lazy SLA check — a single ticket is cheap enough to await before
+    // responding, so the badge the caller sees is already up to date
+    await evaluateTicketSla(ticket).catch((err) => console.log('lazy SLA check (detail) failed:', err.message))
+
     //send res
     res.status(200).json({ message: 'ticket fetched', payload: visible })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// priority change — Manager/Admin, team-scoped. On an active ticket this
+// recomputes due dates from the same sla.startedAt (plus paused time);
+// on a PENDING_APPROVAL ticket it's just a field change (no clock yet).
+// Registered BEFORE the wildcard :action route below — otherwise Express
+// would match /tickets/:id/priority as :action="priority" and reject it
+// as an unknown transition.
+const CLOSED_STATUSES = ['RESOLVED', 'CLOSED', 'CANCELLED', 'REJECTED']
+ticketApp.patch('/tickets/:ticketId/priority', verifyToken('MANAGER', 'ADMIN'), async (req, res, next) => {
+  try {
+    const { priority, version } = req.body
+    if (!priority) {
+      //send res
+      return res.status(400).json({ message: 'priority is required' })
+    }
+    const ticket = await TicketModel.findOne({ ...idOrPublicIdFilter(req.params.ticketId), isDeleted: false })
+    if (!ticket) {
+      //send res
+      return res.status(404).json({ message: 'ticket not found' })
+    }
+    if (req.user.role !== 'ADMIN' && req.user.department !== ticket.department.toString()) {
+      //send res
+      return res.status(403).json({ message: 'this ticket belongs to a different team' })
+    }
+    if (CLOSED_STATUSES.includes(ticket.status)) {
+      //send res
+      return res.status(400).json({ message: `cannot change priority on a ${ticket.status} ticket` })
+    }
+    if (typeof version === 'number' && version !== ticket.version) {
+      //send res
+      return res.status(409).json({ message: 'ticket was updated by someone else, please refresh' })
+    }
+
+    const newPolicy = await SLAPolicyModel.findOne({ priority, isActive: true })
+    if (!newPolicy) {
+      //send res
+      return res.status(400).json({ message: 'invalid or inactive priority' })
+    }
+
+    const previousPriority = ticket.priority
+    ticket.priority = priority
+    ticket.version += 1
+    ticket.statusHistory.push({ from: ticket.status, to: ticket.status, by: req.user.id, note: `priority changed ${previousPriority} → ${priority}` })
+
+    if (ticket.status === 'PENDING_APPROVAL') {
+      // no SLA clock yet — just the field change, per the handoff plan
+      ticket.sla.policy = newPolicy._id
+    } else {
+      const settings = await getOrgSettings()
+      const patch = recomputeSlaForPriorityChange(ticket.sla, newPolicy, settings.businessHours)
+      Object.assign(ticket.sla, patch)
+    }
+
+    await ticket.save()
+    //send res
+    res.status(200).json({ message: 'priority updated', payload: ticket })
   } catch (err) {
     next(err)
   }
@@ -213,7 +286,9 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
 
     if (action === 'approve') {
       const policy = await SLAPolicyModel.findOne({ priority: ticket.priority, isActive: true })
-      ticket.sla = { ...ticket.sla, ...computeSlaDueDates(new Date(), policy) }
+      const settings = await getOrgSettings()
+      const clock = startSlaClock(new Date(), policy, settings.businessHours)
+      ticket.sla = { ...ticket.sla.toObject?.() ?? ticket.sla, ...clock, policy: policy?._id }
       ticket.approval.approvedBy = req.user.id
       ticket.approval.approvedAt = new Date()
       await createNotification({ user: ticket.requester, type: 'TICKET_APPROVED', message: `Ticket ${ticket.publicId} was approved and is now open`, link: `/tickets/${ticket.publicId}` })
@@ -265,9 +340,12 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       ticket.sla.pausedAt = new Date()
     }
     if (action === 'resume' && ticket.sla.pausedAt) {
-      const pausedMs = Date.now() - ticket.sla.pausedAt.getTime()
+      const policy = ticket.sla.policy ? await SLAPolicyModel.findById(ticket.sla.policy) : null
+      const settings = await getOrgSettings()
+      const pausedMs = elapsedMs(ticket.sla.pausedAt, new Date(), policy, settings.businessHours)
       if (ticket.sla.responseDueAt) ticket.sla.responseDueAt = new Date(ticket.sla.responseDueAt.getTime() + pausedMs)
       if (ticket.sla.resolutionDueAt) ticket.sla.resolutionDueAt = new Date(ticket.sla.resolutionDueAt.getTime() + pausedMs)
+      if (ticket.sla.warnAt) ticket.sla.warnAt = new Date(ticket.sla.warnAt.getTime() + pausedMs)
       ticket.sla.totalPausedMs = (ticket.sla.totalPausedMs || 0) + pausedMs
       ticket.sla.pausedAt = undefined
     }
@@ -283,12 +361,21 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       ticket.resolution.confirmedAt = new Date()
     }
     if (action === 'reopen') {
-      // new SLA cycle — same-priority policy, wall-clock due dates from now
+      // new SLA cycle from now — response SLA isn't re-run (first response
+      // already happened), only resolutionDueAt/warnAt restart; a breach
+      // from the cycle that just ended is banked into pastBreaches
       const policy = await SLAPolicyModel.findOne({ priority: ticket.priority, isActive: true })
-      const { resolutionDueAt } = computeSlaDueDates(new Date(), policy)
+      const settings = await getOrgSettings()
+      const now = new Date()
+      const clock = startSlaClock(now, policy, settings.businessHours)
       ticket.reopenCount = (ticket.reopenCount || 0) + 1
-      ticket.sla.resolutionDueAt = resolutionDueAt
+      ticket.sla.pastBreaches = (ticket.sla.pastBreaches || 0) + (ticket.sla.resolutionBreached ? 1 : 0)
+      ticket.sla.startedAt = now
+      ticket.sla.resolutionDueAt = clock.resolutionDueAt
+      ticket.sla.warnAt = clock.warnAt
       ticket.sla.resolutionBreached = false
+      ticket.sla.warningSent = false
+      ticket.sla.escalationLevel = ticket.sla.responseBreached ? 1 : 0 // responseBreached isn't touched by reopen, so don't clobber it
       ticket.sla.totalPausedMs = 0
       ticket.resolution = { summary: undefined, resolvedBy: undefined, resolvedAt: undefined, confirmedByRequester: false, confirmedAt: undefined }
       if (ticket.assignedTo) {

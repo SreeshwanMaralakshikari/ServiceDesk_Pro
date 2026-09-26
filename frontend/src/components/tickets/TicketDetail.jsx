@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useAuthStore } from '../../store/authStore.js'
 import { styles, statusColors, priorityColors } from '../../styles/common.js'
+import { getSlaStatus, formatSlaCountdown } from '../../utils/sla.js'
 
 // actions that need a required text reason/note alongside them
 const NOTE_REQUIRED_ACTIONS = ['reject', 'cancel', 'hold', 'reopen']
@@ -45,6 +46,8 @@ export const TicketDetail = () => {
   const user = useAuthStore((s) => s.user)
   const [ticket, setTicket] = useState(null)
   const [technicians, setTechnicians] = useState([])
+  const [priorities, setPriorities] = useState([])
+  const [priorityPick, setPriorityPick] = useState('')
   const [loading, setLoading] = useState(true)
   const [commentText, setCommentText] = useState('')
   const [isInternal, setIsInternal] = useState(false)
@@ -64,8 +67,26 @@ export const TicketDetail = () => {
   useEffect(() => {
     if (user?.role === 'MANAGER' || user?.role === 'ADMIN') {
       axiosInstance.get('/ticket-api/team-technicians').then(({ data }) => setTechnicians(data.payload)).catch(() => {})
+      axiosInstance.get('/meta-api/priorities').then(({ data }) => setPriorities(data.payload)).catch(() => {})
     }
   }, [user])
+
+  const changePriority = async () => {
+    if (!priorityPick || priorityPick === ticket.priority) return
+    try {
+      await axiosInstance.patch(`/ticket-api/tickets/${ticketId}/priority`, { priority: priorityPick, version: ticket.version })
+      toast.success('Priority updated')
+      setPriorityPick('')
+      load()
+    } catch (err) {
+      if (err.response?.status === 409) {
+        toast.error('This ticket changed. Reloading…')
+        load()
+      } else {
+        toast.error(err.response?.data?.message || 'Failed to change priority')
+      }
+    }
+  }
 
   const runAction = async (action, body = {}) => {
     try {
@@ -102,6 +123,8 @@ export const TicketDetail = () => {
   const actions = actionsFor(ticket, user)
   const isStaff = user.role === 'ADMIN' || user.role === 'MANAGER' || user.role === 'TECHNICIAN'
   const simpleActions = actions.filter((a) => a !== 'resolve' && !NOTE_REQUIRED_ACTIONS.includes(a) && !ASSIGN_ACTIONS.includes(a))
+  const sla = getSlaStatus(ticket)
+  const canChangePriority = (user.role === 'MANAGER' || user.role === 'ADMIN') && !['RESOLVED', 'CLOSED', 'CANCELLED', 'REJECTED'].includes(ticket.status)
 
   return (
     <div className={styles.container}>
@@ -111,9 +134,15 @@ export const TicketDetail = () => {
             <p className="font-mono text-xs text-slate-400">{ticket.publicId}</p>
             <h1 className={styles.h1 + ' mb-1'}>{ticket.title}</h1>
           </div>
-          <div className="flex gap-2">
-            <span className={`${styles.badge} ${priorityColors[ticket.priority] || ''}`}>{ticket.priority}</span>
-            <span className={`${styles.badge} ${statusColors[ticket.status] || ''}`}>{ticket.status}</span>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex gap-2">
+              <span className={`${styles.badge} ${priorityColors[ticket.priority] || ''}`}>{ticket.priority}</span>
+              <span className={`${styles.badge} ${statusColors[ticket.status] || ''}`}>{ticket.status}</span>
+              {sla && <span className={`${styles.badge} ${sla.className}`}>{sla.label}</span>}
+            </div>
+            {sla && sla.label !== 'On hold' && ticket.sla?.resolutionDueAt && (
+              <p className="text-xs text-slate-400">{formatSlaCountdown(ticket.sla.resolutionDueAt)} to resolve</p>
+            )}
           </div>
         </div>
         <p className="text-slate-700 mb-4 whitespace-pre-wrap">{ticket.description}</p>
@@ -122,6 +151,15 @@ export const TicketDetail = () => {
           {' '}Category: {ticket.category?.name} ·
           {' '}Assigned to: {ticket.assignedTo ? `${ticket.assignedTo.firstName} ${ticket.assignedTo.lastName}` : 'unassigned'}
         </p>
+        {canChangePriority && (
+          <div className="flex items-center gap-2 mb-2">
+            <select className={styles.select + ' max-w-[10rem]'} value={priorityPick} onChange={(e) => setPriorityPick(e.target.value)}>
+              <option value="">Change priority…</option>
+              {priorities.filter((p) => p.priority !== ticket.priority).map((p) => <option key={p._id} value={p.priority}>{p.label}</option>)}
+            </select>
+            {priorityPick && <button className={styles.btnSecondary} onClick={changePriority}>Apply</button>}
+          </div>
+        )}
         {ticket.status === 'REJECTED' && ticket.approval?.rejectionReason && (
           <p className="text-sm text-red-600 mb-2">Rejected: {ticket.approval.rejectionReason}</p>
         )}

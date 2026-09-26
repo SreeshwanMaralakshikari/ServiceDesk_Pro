@@ -54,7 +54,7 @@ export const CreateTicket = () => {
             <label className={styles.label}>Priority (optional — defaults to the category's)</label>
             <select className={styles.select} value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
               <option value="">Use category default</option>
-              {priorities.map((p) => <option key={p._id} value={p.priority}>{p.label}</option>)}
+              {priorities.filter((p) => p.level > 0).map((p) => <option key={p._id} value={p.priority}>{p.label}</option>)}
             </select>
           </div>
           <button className={styles.btnPrimary} disabled={loading} type="submit">

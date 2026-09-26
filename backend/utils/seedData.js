@@ -25,10 +25,15 @@ export const seedIfEmpty = async () => {
   const [hr, eng, serviceDesk, infra] = departments
 
   const priorities = await SLAPolicyModel.insertMany([
-    { priority: 'LOW', label: 'Low', level: 1, color: '#6b7280', responseTimeHours: 24, resolutionTimeHours: 72 },
-    { priority: 'MEDIUM', label: 'Medium', level: 2, color: '#3b82f6', responseTimeHours: 8, resolutionTimeHours: 24 },
-    { priority: 'HIGH', label: 'High', level: 3, color: '#f59e0b', responseTimeHours: 4, resolutionTimeHours: 8 },
-    { priority: 'CRITICAL', label: 'Critical', level: 4, color: '#ef4444', responseTimeHours: 1, resolutionTimeHours: 4 },
+    { priority: 'LOW', label: 'Low', level: 1, color: '#6b7280', responseTimeHours: 24, resolutionTimeHours: 72, businessHoursOnly: true },
+    { priority: 'MEDIUM', label: 'Medium', level: 2, color: '#3b82f6', responseTimeHours: 8, resolutionTimeHours: 24, businessHoursOnly: true },
+    { priority: 'HIGH', label: 'High', level: 3, color: '#f59e0b', responseTimeHours: 4, resolutionTimeHours: 8, businessHoursOnly: true },
+    { priority: 'CRITICAL', label: 'Critical', level: 4, color: '#ef4444', responseTimeHours: 1, resolutionTimeHours: 4, businessHoursOnly: true },
+    // demo/test priority: plain wall-clock, minutes not hours, so you can
+    // watch a ticket go on-track -> at-risk -> breached in real time
+    // without waiting for business hours. Not shown as a normal option —
+    // pick it explicitly in a ticket's priority dropdown to demo the SLA checker.
+    { priority: 'TEST', label: 'Test (fast demo)', level: 0, color: '#a855f7', responseTimeHours: 0.02, resolutionTimeHours: 0.05, businessHoursOnly: false },
   ])
 
   const categories = await CategoryModel.insertMany([

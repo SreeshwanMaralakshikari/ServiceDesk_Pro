@@ -74,3 +74,49 @@ Content-Type: application/json
 {
   "technicianId": "PASTE_OTHER_TECHNICIAN_ID"
 }
+
+### --- Phase 3: SLA engine ---
+
+### create a ticket, then immediately downgrade it to the fast "TEST" priority
+### to watch it go on-track -> at-risk -> breached in ~1-3 minutes instead
+### of waiting on real business hours (login as manager first)
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/priority
+Content-Type: application/json
+
+{
+  "priority": "TEST"
+}
+
+### fetch the ticket a few times over the next few minutes — the "sla"
+### object's responseDueAt/resolutionDueAt/warnAt will already be in the
+### past, and each fetch triggers the lazy SLA check (see evaluateSla.js)
+GET {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID
+
+### check notifications arrived (login as the manager/technician who
+### should have been notified)
+GET {{baseUrl}}/notification-api/my-notifications
+
+### admin: view/update org-wide business hours
+GET {{baseUrl}}/admin-api/org-settings
+
+### admin: e.g. shift business hours to 08:00-20:00
+PUT {{baseUrl}}/admin-api/org-settings
+Content-Type: application/json
+
+{
+  "businessHours": { "start": "08:00", "end": "20:00" }
+}
+
+### admin: create a policy with businessHoursOnly explicitly set
+POST {{baseUrl}}/admin-api/sla-policies
+Content-Type: application/json
+
+{
+  "priority": "URGENT",
+  "label": "Urgent",
+  "level": 5,
+  "color": "#dc2626",
+  "responseTimeHours": 0.5,
+  "resolutionTimeHours": 2,
+  "businessHoursOnly": true
+}
