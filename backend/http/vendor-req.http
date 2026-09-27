@@ -1,0 +1,26 @@
+@baseUrl = http://localhost:5000
+
+### login as asset manager or admin first
+
+### list vendors
+GET {{baseUrl}}/vendor-api/vendors
+
+### create a vendor
+POST {{baseUrl}}/vendor-api/vendors
+Content-Type: application/json
+
+{
+  "name": "Lenovo India",
+  "contactPerson": "Anita Rao",
+  "email": "anita@lenovosupport.example",
+  "phone": "+91-98765-00010",
+  "servicesProvided": "Laptops and docking stations"
+}
+
+### update / deactivate a vendor (fails with 409 if still linked to active assets)
+PATCH {{baseUrl}}/vendor-api/vendors/PASTE_VENDOR_ID
+Content-Type: application/json
+
+{
+  "isActive": false
+}

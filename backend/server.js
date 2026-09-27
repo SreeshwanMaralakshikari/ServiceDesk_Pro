@@ -10,9 +10,12 @@ import { metaApp } from './APIs/MetaAPI.js'
 import { ticketApp } from './APIs/TicketAPI.js'
 import { adminApp } from './APIs/AdminAPI.js'
 import { notificationApp } from './APIs/NotificationAPI.js'
+import { assetApp } from './APIs/AssetAPI.js'
+import { vendorApp } from './APIs/VendorAPI.js'
 import { seedIfEmpty } from './utils/seedData.js'
 import { sanitizeBody } from './middlewares/sanitize.js'
 import { startSlaChecker } from './jobs/slaChecker.js'
+import { startWarrantyChecker } from './jobs/warrantyChecker.js'
 
 config()
 
@@ -48,6 +51,8 @@ app.use('/meta-api', metaApp)
 app.use('/ticket-api', ticketApp)
 app.use('/admin-api', adminApp)
 app.use('/notification-api', notificationApp)
+app.use('/asset-api', assetApp)
+app.use('/vendor-api', vendorApp)
 
 const connectDB = async (attempt = 1) => {
   const maxAttempts = 8
@@ -61,6 +66,7 @@ const connectDB = async (attempt = 1) => {
     const port = process.env.PORT || 5000
     app.listen(port, () => console.log(`server listening on ${port}...`))
     startSlaChecker() // only after the DB connection is confirmed live
+    startWarrantyChecker()
   } catch (err) {
     console.log(`err in db connect (attempt ${attempt}/${maxAttempts}):`, err.message)
     if (attempt >= maxAttempts) {

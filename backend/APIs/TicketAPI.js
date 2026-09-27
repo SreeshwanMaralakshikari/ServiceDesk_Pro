@@ -3,6 +3,7 @@ import { TicketModel } from '../models/TicketModel.js'
 import { CategoryModel } from '../models/CategoryModel.js'
 import { SLAPolicyModel } from '../models/SLAPolicyModel.js'
 import { UserModel } from '../models/UserModel.js'
+import { AssetModel } from '../models/AssetModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
 import { generateSequentialId } from '../utils/generateSequentialId.js'
 import { getOrgSettings } from '../models/OrgSettingsModel.js'
@@ -217,6 +218,55 @@ ticketApp.patch('/tickets/:ticketId/priority', verifyToken('MANAGER', 'ADMIN'), 
     await ticket.save()
     //send res
     res.status(200).json({ message: 'priority updated', payload: ticket })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// link/change the asset this ticket is about — Employees may only pick
+// one of their own assigned assets; staff (assigned tech, team Manager,
+// Admin) can link any asset. No status change. Registered before the
+// wildcard :action route below for the same reason as /priority.
+ticketApp.patch('/tickets/:ticketId/related-asset', verifyToken(...ALL_ROLES), async (req, res, next) => {
+  try {
+    const { assetId } = req.body // null/omitted clears the link
+    const ticket = await TicketModel.findOne({ ...idOrPublicIdFilter(req.params.ticketId), isDeleted: false })
+    if (!ticket) {
+      //send res
+      return res.status(404).json({ message: 'ticket not found' })
+    }
+
+    const isOwner = req.user.id === ticket.requester.toString()
+    const isStaff = req.user.role === 'ADMIN'
+      || req.user.id === ticket.assignedTo?.toString()
+      || ((req.user.role === 'MANAGER') && req.user.department === ticket.department.toString())
+    if (!isOwner && !isStaff) {
+      //send res
+      return res.status(403).json({ message: 'not authorized to link an asset to this ticket' })
+    }
+
+    if (!assetId) {
+      ticket.relatedAsset = undefined
+      await ticket.save()
+      //send res
+      return res.status(200).json({ message: 'related asset cleared', payload: ticket })
+    }
+
+    const asset = await AssetModel.findOne({ ...idOrPublicIdFilter(assetId), isDeleted: false })
+    if (!asset) {
+      //send res
+      return res.status(404).json({ message: 'asset not found' })
+    }
+    // an Employee (non-staff) may only link an asset assigned to themselves
+    if (isOwner && !isStaff && asset.assignedTo?.toString() !== req.user.id) {
+      //send res
+      return res.status(403).json({ message: 'you can only link an asset assigned to you' })
+    }
+
+    ticket.relatedAsset = asset._id
+    await ticket.save()
+    //send res
+    res.status(200).json({ message: 'related asset linked', payload: ticket })
   } catch (err) {
     next(err)
   }

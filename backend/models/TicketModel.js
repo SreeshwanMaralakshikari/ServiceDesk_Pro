@@ -33,6 +33,7 @@ const ticketSchema = new Schema({
   department:          { type: Types.ObjectId, ref: 'department', required: true }, // handling IT team
   category:            { type: Types.ObjectId, ref: 'category', required: true },
   priority:            { type: String, default: 'MEDIUM' },
+  relatedAsset:        { type: Types.ObjectId, ref: 'asset' }, // optional — the asset this ticket is about
 
   status: {
     type: String,

@@ -4,6 +4,9 @@ import { UserModel } from '../models/UserModel.js'
 import { DepartmentModel } from '../models/DepartmentModel.js'
 import { CategoryModel } from '../models/CategoryModel.js'
 import { SLAPolicyModel } from '../models/SLAPolicyModel.js'
+import { VendorModel } from '../models/VendorModel.js'
+import { AssetModel } from '../models/AssetModel.js'
+import { generateSequentialId } from './generateSequentialId.js'
 
 config()
 
@@ -53,6 +56,55 @@ export const seedIfEmpty = async () => {
   const assetMgr = await UserModel.create({ firstName: 'Amy', lastName: 'Assets', email: 'assets@sdp.test', password, role: 'ASSET_MANAGER' })
 
   await DepartmentModel.findByIdAndUpdate(serviceDesk._id, { manager: manager._id })
+
+  const vendors = await VendorModel.insertMany([
+    { name: 'Dell Technologies', contactPerson: 'Raj Mehta', email: 'raj@dellsupport.example', phone: '+91-98765-00001', servicesProvided: 'Laptop & desktop hardware' },
+    { name: 'Microsoft', contactPerson: 'Priya Nair', email: 'priya@msftlicensing.example', phone: '+91-98765-00002', servicesProvided: 'Software licensing' },
+    { name: 'Netgear Solutions', contactPerson: 'Sam Iyer', email: 'sam@netgearsol.example', phone: '+91-98765-00003', servicesProvided: 'Networking equipment' },
+  ])
+  const [dell, microsoft, netgear] = vendors
+
+  const daysFromNow = (n) => new Date(Date.now() + n * 24 * 60 * 60 * 1000)
+  const daysAgo = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000)
+
+  const laptopPublicId = await generateSequentialId(AssetModel, 'AST')
+  await AssetModel.create({
+    publicId: laptopPublicId, name: 'Dell Latitude 5440', type: 'HARDWARE', assetClass: 'Laptop',
+    serialNumber: 'DL5440-0001', vendor: dell._id, purchaseDate: daysAgo(400), purchaseCost: 78000,
+    warrantyExpiry: daysFromNow(20), // deliberately inside the 30-day warranty window, to demo that report
+    status: 'ASSIGNED', assignedTo: employee._id, department: eng._id,
+    lifecycleHistory: [
+      { toStatus: 'PROCURED', by: admin._id, note: 'seed data' },
+      { fromStatus: 'PROCURED', toStatus: 'IN_STOCK', by: assetMgr._id },
+      { fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', by: assetMgr._id, note: 'assigned to Eli Employee' },
+    ],
+  })
+
+  const monitorPublicId = await generateSequentialId(AssetModel, 'AST')
+  await AssetModel.create({
+    publicId: monitorPublicId, name: 'Dell 24" Monitor', type: 'HARDWARE', assetClass: 'Monitor',
+    serialNumber: 'DM24-0007', vendor: dell._id, purchaseDate: daysAgo(200), purchaseCost: 12000,
+    warrantyExpiry: daysFromNow(365), status: 'IN_STOCK', department: eng._id,
+    lifecycleHistory: [{ toStatus: 'PROCURED', by: admin._id }, { fromStatus: 'PROCURED', toStatus: 'IN_STOCK', by: assetMgr._id }],
+  })
+
+  const licensePublicId = await generateSequentialId(AssetModel, 'AST')
+  await AssetModel.create({
+    publicId: licensePublicId, name: 'Microsoft 365 E3', type: 'SOFTWARE', assetClass: 'License',
+    licenseKey: 'M365-XXXX-YYYY-0001', vendor: microsoft._id, purchaseDate: daysAgo(100), purchaseCost: 15000,
+    warrantyExpiry: daysFromNow(5), // also inside the warranty window
+    status: 'ASSIGNED', assignedTo: tech._id, department: serviceDesk._id,
+    lifecycleHistory: [{ toStatus: 'PROCURED', by: admin._id }, { fromStatus: 'PROCURED', toStatus: 'IN_STOCK', by: assetMgr._id }, { fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', by: assetMgr._id }],
+  })
+
+  const routerPublicId = await generateSequentialId(AssetModel, 'AST')
+  await AssetModel.create({
+    publicId: routerPublicId, name: 'Netgear Rack Switch', type: 'HARDWARE', assetClass: 'Networking',
+    serialNumber: 'NG-SW-0003', vendor: netgear._id, purchaseDate: daysAgo(600), purchaseCost: 45000,
+    warrantyExpiry: daysAgo(10), // already expired, to demo an overdue entry
+    status: 'IN_REPAIR', department: infra._id,
+    lifecycleHistory: [{ toStatus: 'PROCURED', by: admin._id }, { fromStatus: 'PROCURED', toStatus: 'IN_STOCK', by: assetMgr._id }, { fromStatus: 'IN_STOCK', toStatus: 'IN_REPAIR', by: tech._id, note: 'intermittent port failure' }],
+  })
 
   console.log('seed complete. demo logins (password: Passw0rd!):')
   console.log('  admin@sdp.test / manager@sdp.test / tech@sdp.test / employee@sdp.test / assets@sdp.test')

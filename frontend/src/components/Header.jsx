@@ -20,8 +20,11 @@ export const Header = () => {
         <nav className="flex items-center gap-4">
           {isAuthenticated ? (
             <>
-              <Link to="/tickets" className={styles.navLink}>My Tickets</Link>
+              {user?.role !== 'ASSET_MANAGER' && <Link to="/tickets" className={styles.navLink}>My Tickets</Link>}
               {(user?.role === 'MANAGER' || user?.role === 'ADMIN') && <Link to="/approvals" className={styles.navLink}>Approvals</Link>}
+              <Link to="/my-assets" className={styles.navLink}>My Assets</Link>
+              {(user?.role === 'ASSET_MANAGER' || user?.role === 'ADMIN' || user?.role === 'TECHNICIAN') && <Link to="/assets" className={styles.navLink}>Assets</Link>}
+              {(user?.role === 'ASSET_MANAGER' || user?.role === 'ADMIN') && <Link to="/vendors" className={styles.navLink}>Vendors</Link>}
               {user?.role === 'ADMIN' && <Link to="/admin" className={styles.navLink}>Admin</Link>}
               <span className="text-sm text-slate-400">{user?.firstName} · {user?.role}</span>
               <button onClick={handleLogout} className={styles.btnSecondary}>Logout</button>

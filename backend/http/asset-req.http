@@ -1,0 +1,110 @@
+@baseUrl = http://localhost:5000
+
+### login as asset manager first (see auth-req.http, use assets@sdp.test)
+
+### list assets
+GET {{baseUrl}}/asset-api/assets
+
+### warranty-expiring report (default 30 days)
+GET {{baseUrl}}/asset-api/assets/warranty-expiring
+
+### create an asset
+POST {{baseUrl}}/asset-api/assets
+Content-Type: application/json
+
+{
+  "name": "HP EliteBook 840",
+  "type": "HARDWARE",
+  "assetClass": "Laptop",
+  "serialNumber": "HP840-0099",
+  "purchaseCost": 82000,
+  "warrantyExpiry": "2027-01-01"
+}
+
+### full lifecycle walk (replace PASTE_ASSET_ID with the publicId, e.g. AST-2026-00005)
+
+### PROCURED -> IN_STOCK
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/activate
+Content-Type: application/json
+
+{}
+
+### IN_STOCK -> ASSIGNED (assignedTo required)
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/assign
+Content-Type: application/json
+
+{
+  "assignedTo": "PASTE_USER_ID"
+}
+
+### ASSIGNED -> IN_STOCK (returned)
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/return
+Content-Type: application/json
+
+{}
+
+### IN_STOCK/ASSIGNED -> IN_REPAIR (also works logged in as a technician)
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/repair
+Content-Type: application/json
+
+{ "note": "screen flickering" }
+
+### IN_REPAIR -> ASSIGNED (only if it still has an assignedTo on record)
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/reinstate
+Content-Type: application/json
+
+{}
+
+### IN_REPAIR -> IN_STOCK (clears assignedTo)
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/restock
+Content-Type: application/json
+
+{}
+
+### terminal: -> RETIRED
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/retire
+Content-Type: application/json
+
+{}
+
+### try ASSIGNED -> RETIRED directly (should 400 -- not in the transition table)
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/retire
+Content-Type: application/json
+
+{}
+
+### replace an assigned/in-repair asset with one that's IN_STOCK
+PATCH {{baseUrl}}/asset-api/assets/PASTE_OLD_ASSET_ID/replace
+Content-Type: application/json
+
+{
+  "newAssetId": "PASTE_NEW_IN_STOCK_ASSET_ID",
+  "note": "old unit had a failing battery"
+}
+
+### add a maintenance entry
+POST {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/maintenance
+Content-Type: application/json
+
+{
+  "type": "Repair",
+  "cost": 1500,
+  "note": "replaced keyboard"
+}
+
+### lifecycle history
+GET {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/history
+
+### tickets referencing this asset
+GET {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/tickets
+
+### my assets (login as any user with assigned assets, e.g. employee@sdp.test)
+GET {{baseUrl}}/asset-api/my-assets
+
+### link an asset to a ticket (employee can only pick their own assigned asset)
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_ID/related-asset
+Content-Type: application/json
+
+{
+  "assetId": "PASTE_MY_ASSET_ID"
+}
