@@ -17,8 +17,10 @@ const ASSIGN_ACTIONS = ['assign', 'reassign']
 const actionsFor = (ticket, user) => {
   if (!ticket || !user) return []
   const { status } = ticket
-  const isOwner = user.id === ticket.requester?._id
-  const isAssignee = user.id === ticket.assignedTo?._id
+  // serialized users carry `_id` (no `id` virtual), and guard the null case so
+  // an unassigned ticket (assignedTo undefined) can't make undefined === undefined
+  const isOwner = Boolean(ticket.requester) && user._id === ticket.requester._id
+  const isAssignee = Boolean(ticket.assignedTo) && user._id === ticket.assignedTo._id
   const isManagerOrAdmin = user.role === 'MANAGER' || user.role === 'ADMIN'
   const options = []
 

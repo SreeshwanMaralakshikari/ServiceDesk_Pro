@@ -12,6 +12,7 @@ import { adminApp } from './APIs/AdminAPI.js'
 import { notificationApp } from './APIs/NotificationAPI.js'
 import { assetApp } from './APIs/AssetAPI.js'
 import { vendorApp } from './APIs/VendorAPI.js'
+import { kbApp } from './APIs/KnowledgeBaseAPI.js'
 import { seedIfEmpty } from './utils/seedData.js'
 import { sanitizeBody } from './middlewares/sanitize.js'
 import { startSlaChecker } from './jobs/slaChecker.js'
@@ -53,6 +54,7 @@ app.use('/admin-api', adminApp)
 app.use('/notification-api', notificationApp)
 app.use('/asset-api', assetApp)
 app.use('/vendor-api', vendorApp)
+app.use('/kb-api', kbApp)
 
 const connectDB = async (attempt = 1) => {
   const maxAttempts = 8
@@ -97,6 +99,16 @@ app.use((err, req, res, next) => {
   if (err.name === 'CastError') {
     //send res
     return res.status(400).json({ message: 'error occurred', error: 'invalid id' })
+  }
+
+  // body-parser errors: bad JSON / too-large body are client mistakes, not server faults
+  if (err.type === 'entity.parse.failed') {
+    //send res
+    return res.status(400).json({ message: 'error occurred', error: 'invalid JSON body' })
+  }
+  if (err.type === 'entity.too.large') {
+    //send res
+    return res.status(413).json({ message: 'error occurred', error: 'request body too large' })
   }
 
   const errCode = err.code ?? err.cause?.code

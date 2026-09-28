@@ -1,0 +1,72 @@
+@baseUrl = http://localhost:5000
+
+### login first (any role for browsing; Technician/Manager/Admin to author)
+
+### list published articles (default view for everyone)
+GET {{baseUrl}}/kb-api/articles
+
+### search (full-text over title, summary, content and tags)
+GET {{baseUrl}}/kb-api/articles?q=wifi
+
+### paging (limit is clamped to 1-100, page to >= 1)
+GET {{baseUrl}}/kb-api/articles?page=2&limit=5
+
+### staff can filter by status; Employees always see PUBLISHED only, whatever they pass
+GET {{baseUrl}}/kb-api/articles?status=DRAFT
+
+### filter by category (note: query param is "category", not "categoryId" —
+### the create/edit body fields use "categoryId" instead, matching TicketAPI's
+### create route, so don't mix the two up)
+GET {{baseUrl}}/kb-api/articles?category=PASTE_CATEGORY_ID
+
+### my own articles, any status (Technician/Manager/Admin only)
+GET {{baseUrl}}/kb-api/articles/mine
+
+### create a draft article (Technician/Manager/Admin only)
+POST {{baseUrl}}/kb-api/articles
+Content-Type: application/json
+
+{
+  "title": "How to Reset Your Corporate Wi-Fi Password",
+  "summary": "Step-by-step guide to resetting your Wi-Fi credentials from the self-service portal.",
+  "content": "1. Go to the self-service portal...\n2. Click 'Reset Wi-Fi Password'...\n3. Follow the emailed link...",
+  "categoryId": "PASTE_CATEGORY_ID",
+  "tags": ["wifi", "network", "password"]
+}
+
+### fetch one article (by _id or publicId, e.g. KB-2026-00001)
+GET {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID
+
+### edit a draft or published article (author, or manager/admin)
+PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID
+Content-Type: application/json
+
+{
+  "summary": "Updated summary text"
+}
+
+### publish
+PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/publish
+Content-Type: application/json
+
+{}
+
+### archive (requires no note, but one can be added)
+PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/archive
+Content-Type: application/json
+
+{
+  "note": "superseded by a newer article"
+}
+
+### restore an archived article back to draft
+PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/restore
+Content-Type: application/json
+
+{}
+
+### view audit history
+GET {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/history
+
+### soft-delete (must be archived or draft first, not published)
+DELETE {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID

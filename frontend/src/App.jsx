@@ -16,6 +16,9 @@ import { AssetList } from './components/assets/AssetList.jsx'
 import { CreateAsset } from './components/assets/CreateAsset.jsx'
 import { AssetDetail } from './components/assets/AssetDetail.jsx'
 import { VendorList } from './components/vendors/VendorList.jsx'
+import { KnowledgeBase } from './components/kb/KnowledgeBase.jsx'
+import { ArticleDetail } from './components/kb/ArticleDetail.jsx'
+import { ArticleForm } from './components/kb/ArticleForm.jsx'
 
 export const router = createBrowserRouter([
   {
@@ -34,6 +37,17 @@ export const router = createBrowserRouter([
           { path: 'tickets/new', element: <CreateTicket /> },
           { path: 'tickets/:ticketId', element: <TicketDetail /> },
           { path: 'my-assets', element: <MyAssets /> },
+          { path: 'kb', element: <KnowledgeBase /> },
+          { path: 'kb/:articleId', element: <ArticleDetail /> },
+        ],
+      },
+      {
+        // authoring — react-router ranks the static `kb/new` above the dynamic
+        // `kb/:articleId` regardless of block order, so this can't be swallowed
+        element: <ProtectedRoutes allowedRoles={['TECHNICIAN', 'MANAGER', 'ADMIN']} />,
+        children: [
+          { path: 'kb/new', element: <ArticleForm /> },
+          { path: 'kb/:articleId/edit', element: <ArticleForm /> },
         ],
       },
       {
