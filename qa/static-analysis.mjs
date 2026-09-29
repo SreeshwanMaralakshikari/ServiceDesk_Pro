@@ -9,7 +9,7 @@ import fs from 'fs'; import path from 'path'
 const FE=(ROOT+'/frontend/node_modules/')
 const { parse } = await load(FE+'@babel/parser/lib/index.js')
 const traverse = (await load(FE+'@babel/traverse/lib/index.js')).default.default ?? (await load(FE+'@babel/traverse/lib/index.js')).default
-const GLOBALS=new Set('process console Buffer setTimeout setInterval clearInterval clearTimeout Date Promise Math JSON Object Array Number String Boolean Error RegExp Set Map URL fetch isNaN parseInt parseFloat undefined NaN Infinity Symbol encodeURIComponent decodeURIComponent window document localStorage sessionStorage globalThis Intl Number BigInt WeakMap Reflect Proxy TypeError RangeError AbortController URLSearchParams FormData Event navigator alert confirm requestAnimationFrame'.split(' '))
+const GLOBALS=new Set('process console Buffer setTimeout setInterval clearInterval clearTimeout Date Promise Math JSON Object Array Number String Boolean Error RegExp Set Map URL fetch isNaN parseInt parseFloat undefined NaN Infinity Symbol encodeURIComponent decodeURIComponent window document localStorage sessionStorage globalThis Intl Number BigInt WeakMap Reflect Proxy TypeError RangeError AbortController URLSearchParams FormData Event navigator alert confirm requestAnimationFrame global require module exports __dirname __filename structuredClone queueMicrotask performance TextEncoder TextDecoder'.split(' '))
 const roots=[['backend',(ROOT+'/backend'),['node_modules']],['frontend',(ROOT+'/frontend/src'),[]]]
 let problems=0, files=0
 for(const [label,root,skip] of roots){

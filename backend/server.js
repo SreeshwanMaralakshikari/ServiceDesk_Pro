@@ -13,6 +13,7 @@ import { notificationApp } from './APIs/NotificationAPI.js'
 import { assetApp } from './APIs/AssetAPI.js'
 import { vendorApp } from './APIs/VendorAPI.js'
 import { kbApp } from './APIs/KnowledgeBaseAPI.js'
+import { aiApp } from './APIs/AiAPI.js'
 import { seedIfEmpty } from './utils/seedData.js'
 import { sanitizeBody } from './middlewares/sanitize.js'
 import { startSlaChecker } from './jobs/slaChecker.js'
@@ -55,6 +56,7 @@ app.use('/notification-api', notificationApp)
 app.use('/asset-api', assetApp)
 app.use('/vendor-api', vendorApp)
 app.use('/kb-api', kbApp)
+app.use('/ai-api', aiApp)
 
 const connectDB = async (attempt = 1) => {
   const maxAttempts = 8
@@ -62,6 +64,7 @@ const connectDB = async (attempt = 1) => {
   try {
     await connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 10000 })
     console.log('DB connected')
+    console.log(process.env.GROQ_API_KEY ? 'AI classification: enabled (GROQ_API_KEY set)' : 'AI classification: no GROQ_API_KEY set — classify-ticket will use the offline fallback')
     if (process.env.SEED_ON_START === 'true') {
       await seedIfEmpty()
     }

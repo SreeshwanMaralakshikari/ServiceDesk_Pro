@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useAuthStore } from '../../store/authStore.js'
 import { styles, statusColors, priorityColors } from '../../styles/common.js'
 import { getSlaStatus, formatSlaCountdown } from '../../utils/sla.js'
+import { getErrorMessage } from '../../utils/errors.js'
 
 // actions that need a required text reason/note alongside them
 const NOTE_REQUIRED_ACTIONS = ['reject', 'cancel', 'hold', 'reopen']
@@ -46,6 +47,9 @@ const ACTION_LABELS = {
 export const TicketDetail = () => {
   const { ticketId } = useParams()
   const user = useAuthStore((s) => s.user)
+  // hoisted above the early returns below, since a hook (the KB-suggestions
+  // effect) needs it and hooks can't follow a conditional return
+  const isStaff = user?.role === 'ADMIN' || user?.role === 'MANAGER' || user?.role === 'TECHNICIAN'
   const [ticket, setTicket] = useState(null)
   const [technicians, setTechnicians] = useState([])
   const [priorities, setPriorities] = useState([])
@@ -56,15 +60,29 @@ export const TicketDetail = () => {
   const [resolutionSummary, setResolutionSummary] = useState('')
   const [noteDrafts, setNoteDrafts] = useState({})
   const [technicianPick, setTechnicianPick] = useState('')
+  const [kbSuggestions, setKbSuggestions] = useState(null) // { matchedBy, articles } | null while loading or unavailable
 
   const load = useCallback(() => {
     axiosInstance.get(`/ticket-api/tickets/${ticketId}`)
       .then(({ data }) => setTicket(data.payload))
-      .catch((err) => toast.error(err.response?.data?.message || 'Failed to load ticket'))
+      .catch((err) => toast.error(getErrorMessage(err, 'Failed to load ticket')))
       .finally(() => setLoading(false))
   }, [ticketId])
 
   useEffect(() => { load() }, [load])
+
+  // AI-suggested KB articles for this ticket — staff only, and only once the
+  // ticket itself has loaded (the endpoint re-derives its own visibility
+  // scope from the ticket, so this can't leak anything the caller couldn't
+  // already see via GET /ticket-api/tickets/:id)
+  useEffect(() => {
+    if (!ticket || !isStaff) { setKbSuggestions(null); return }
+    let cancelled = false
+    axiosInstance.get(`/ai-api/kb-suggestions/${ticketId}`)
+      .then(({ data }) => { if (!cancelled) setKbSuggestions(data.payload) })
+      .catch(() => { if (!cancelled) setKbSuggestions(null) }) // quietly optional — never blocks the ticket page
+    return () => { cancelled = true }
+  }, [ticket?._id, isStaff, ticketId])
 
   useEffect(() => {
     if (user?.role === 'MANAGER' || user?.role === 'ADMIN') {
@@ -85,7 +103,7 @@ export const TicketDetail = () => {
         toast.error('This ticket changed. Reloading…')
         load()
       } else {
-        toast.error(err.response?.data?.message || 'Failed to change priority')
+        toast.error(getErrorMessage(err, 'Failed to change priority'))
       }
     }
   }
@@ -102,7 +120,7 @@ export const TicketDetail = () => {
         toast.error('This ticket changed. Reloading…')
         load()
       } else {
-        toast.error(err.response?.data?.message || `Failed to ${action}`)
+        toast.error(getErrorMessage(err, `Failed to ${action}`))
       }
     }
   }
@@ -115,7 +133,7 @@ export const TicketDetail = () => {
       setCommentText('')
       load()
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to add comment')
+      toast.error(getErrorMessage(err, 'Failed to add comment'))
     }
   }
 
@@ -123,7 +141,6 @@ export const TicketDetail = () => {
   if (!ticket) return <div className={styles.container}>Ticket not found.</div>
 
   const actions = actionsFor(ticket, user)
-  const isStaff = user.role === 'ADMIN' || user.role === 'MANAGER' || user.role === 'TECHNICIAN'
   const simpleActions = actions.filter((a) => a !== 'resolve' && !NOTE_REQUIRED_ACTIONS.includes(a) && !ASSIGN_ACTIONS.includes(a))
   const sla = getSlaStatus(ticket)
   const canChangePriority = (user.role === 'MANAGER' || user.role === 'ADMIN') && !['RESOLVED', 'CLOSED', 'CANCELLED', 'REJECTED'].includes(ticket.status)
@@ -210,6 +227,22 @@ export const TicketDetail = () => {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {isStaff && kbSuggestions?.articles?.length > 0 && (
+          <div className="mb-6 border-t border-slate-100 pt-4">
+            <h2 className={styles.h2}>Suggested knowledge base articles</h2>
+            <ul className="space-y-2">
+              {kbSuggestions.articles.map((a) => (
+                <li key={a._id}>
+                  <Link to={`/kb/${a.publicId}`} className="block rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
+                    <p className="text-sm font-medium text-indigo-700">{a.title}</p>
+                    <p className="text-xs text-slate-500">{a.summary}</p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

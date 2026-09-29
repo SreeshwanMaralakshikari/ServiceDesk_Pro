@@ -3,13 +3,36 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
 import { styles } from '../../styles/common.js'
+import { getErrorMessage } from '../../utils/errors.js'
 
 export const CreateTicket = () => {
   const [categories, setCategories] = useState([])
   const [priorities, setPriorities] = useState([])
   const [form, setForm] = useState({ title: '', description: '', categoryId: '', priority: '' })
   const [loading, setLoading] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestion, setSuggestion] = useState(null) // { source: 'ai'|'fallback', probableIssue, categoryId } | null
   const navigate = useNavigate()
+
+  const suggest = async () => {
+    if (!form.title.trim() && !form.description.trim()) {
+      toast.error('Type a title or description first')
+      return
+    }
+    setSuggesting(true)
+    try {
+      const { data } = await axiosInstance.post('/ai-api/classify-ticket', { title: form.title, description: form.description })
+      const s = data.payload
+      // fills in the pickers but never overwrites a category/priority the
+      // person already chose themselves
+      setForm((f) => ({ ...f, categoryId: f.categoryId || s.categoryId || '', priority: f.priority || s.priority || '' }))
+      setSuggestion(s)
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not get a suggestion'))
+    } finally {
+      setSuggesting(false)
+    }
+  }
 
   useEffect(() => {
     axiosInstance.get('/meta-api/categories').then(({ data }) => setCategories(data.payload))
@@ -24,7 +47,7 @@ export const CreateTicket = () => {
       toast.success(data.payload.status === 'PENDING_APPROVAL' ? `Ticket ${data.payload.publicId} submitted for approval` : `Ticket ${data.payload.publicId} created`)
       navigate(`/tickets/${data.payload.publicId}`)
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to create ticket')
+      toast.error(getErrorMessage(err, 'Failed to create ticket'))
     } finally {
       setLoading(false)
     }
@@ -33,7 +56,12 @@ export const CreateTicket = () => {
   return (
     <div className={styles.container}>
       <div className={`${styles.card} max-w-lg mx-auto`}>
-        <h1 className={styles.h1}>Create ticket</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className={styles.h1 + ' mb-0'}>Create ticket</h1>
+          <button type="button" className={styles.btnSecondary} onClick={suggest} disabled={suggesting}>
+            {suggesting ? 'Thinking…' : '✨ Suggest category & priority'}
+          </button>
+        </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className={styles.label}>Title</label>
@@ -57,6 +85,13 @@ export const CreateTicket = () => {
               {priorities.filter((p) => p.level > 0).map((p) => <option key={p._id} value={p.priority}>{p.label}</option>)}
             </select>
           </div>
+          {suggestion && (
+            <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-3 text-sm text-indigo-900">
+              <p className="font-medium">{suggestion.source === 'ai' ? 'AI suggestion' : 'Best-effort suggestion (AI unavailable right now)'}</p>
+              {suggestion.probableIssue && <p className="mt-1">{suggestion.probableIssue}</p>}
+              {!suggestion.categoryId && <p className="mt-1 text-indigo-700">No confident category match — please pick one yourself.</p>}
+            </div>
+          )}
           <button className={styles.btnPrimary} disabled={loading} type="submit">
             {loading ? 'Submitting…' : 'Submit ticket'}
           </button>
