@@ -27,6 +27,21 @@ const isText = (v) => typeof v === 'string'
 const logAttempt = (fields) => AiLogModel.create(fields).catch((err) => { console.log('AiLog write failed (non-fatal):', err.message); return null })
 const CACHE_HOURS = 24
 
+// Models now and then return JSON with a missing comma or quote. Ask once more before giving up.
+// Network and HTTP errors are not retried (they would only slow the page down).
+const askForJson = async (args) => {
+  let lastError
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const raw = await groqClient.chatCompletion(args)
+    try {
+      return parseModelJson(raw)
+    } catch (err) {
+      lastError = err
+    }
+  }
+  throw lastError
+}
+
 // POST /ai-api/classify-ticket — same roles as ticket creation (EMPLOYEE,
 // ADMIN), called from the create-ticket form BEFORE the ticket exists, so
 // there is no ticket id yet and this never touches TicketModel.
@@ -110,8 +125,7 @@ aiApp.post('/classify-ticket', verifyToken('EMPLOYEE', 'ADMIN'), aiLimiter, asyn
         '{"categoryName": string, "priority": string, "probableIssue": string}',
         'and no other text, no markdown fences.',
       ].join(' ')
-      const raw = await groqClient.chatCompletion({ system, user: text, maxTokens: 200 })
-      const parsed = parseModelJson(raw)
+      const parsed = await askForJson({ system, user: text, maxTokens: 200 })
       const matchedCategory = categories.find((c) => c.name.toLowerCase() === String(parsed.categoryName).toLowerCase())
       const matchedPriority = priorityCodes.find((p) => p.toLowerCase() === String(parsed.priority).toLowerCase())
       if (!matchedCategory || !matchedPriority || !isText(parsed.probableIssue)) {
@@ -235,8 +249,7 @@ aiApp.get('/kb-suggestions/:ticketId', verifyToken('TECHNICIAN', 'MANAGER', 'ADM
           `TICKET: ${cap(ticket.title, 200)}`, cap(ticket.description, 1000), '', 'ARTICLES:',
           ...articles.map((a) => `[${a.publicId}] ${a.title}\nSummary: ${cap(a.summary, 300)}\nContent: ${cap(a.content, 700)}`),
         ].join('\n')
-        const raw = await groqClient.chatCompletion({ system, user, maxTokens: 700 })
-        const items = validateRerank(parseModelJson(raw), articles)
+        const items = validateRerank(await askForJson({ system, user, maxTokens: 700 }), articles)
         const ranked = merge(articles.map(plain), items)
         const at = new Date()
         await logAttempt({

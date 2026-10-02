@@ -456,6 +456,25 @@ describe('POST /ai-api/classify-ticket and GET /ai-api/kb-suggestions', () => {
       assert.equal(chatCompletionCalls.length, 2)
     })
 
+    test('invalid JSON is retried once: a good second answer is used, two bad ones fall back', async () => {
+      reset()
+      let n = 0
+      useAi(() => (++n === 1 ? '{"categoryName": "Network", "priority": "HIGH" "probableIssue": "x"}' : NET))
+      const r = await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down' })
+      assert.equal(r.body.payload.source, 'ai'); assert.equal(chatCompletionCalls.length, 2)
+      assert.equal(aiLogs.at(-1).status, 'SUCCESS')
+
+      reset(); useAi('still not json')
+      const bad = await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down' })
+      assert.equal(bad.body.payload.source, 'fallback'); assert.equal(chatCompletionCalls.length, 2)
+      assert.equal(aiLogs.at(-1).status, 'ERROR')
+
+      // a thrown error (network, HTTP) is not retried
+      reset(); useAi(() => { throw new Error('AI request failed (HTTP 429)') })
+      await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down' })
+      assert.equal(chatCompletionCalls.length, 1)
+    })
+
     test('a cached answer is not reused when its category was deactivated, and failures are never cached', async () => {
       reset(); useAi(NET)
       await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down' })
@@ -553,6 +572,15 @@ describe('POST /ai-api/classify-ticket and GET /ai-api/kb-suggestions', () => {
         assert.equal(aiLogs.at(-1).kind, 'KB_RERANK'); assert.equal(aiLogs.at(-1).status, 'ERROR')
       }
       assert.equal(ticketUpdates, 0, 'a failed attempt is never saved on the ticket')
+    })
+
+    test('re-ranking retries once on malformed JSON before falling back', async () => {
+      const { t, arts } = setup()
+      let n = 0
+      useAi(() => (++n === 1 ? '{"results":[{"articleId":"' + arts[0].publicId + '","relevance":80,"why":"a" "steps":[]}]}' : reply({ articleId: arts[0].publicId, relevance: 80, why: 'ok', steps: [] })))
+      const r = await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+      assert.equal(r.body.payload.source, 'ai'); assert.equal(chatCompletionCalls.length, 2)
+      assert.equal(aiLogs.at(-1).status, 'SUCCESS')
     })
 
     test('a good answer is saved on the ticket and served from there next time; ?refresh=true asks the model again', async () => {
