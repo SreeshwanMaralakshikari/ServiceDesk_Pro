@@ -3,7 +3,7 @@
 // uses MONGO_URI from backend/.env. Never prints the password.
 import './../config/loadEnv.js'
 import bcrypt from 'bcryptjs'
-import { connect, connection } from 'mongoose'
+import mongoose from 'mongoose'
 import { UserModel } from '../models/UserModel.js'
 
 const email = (process.env.RESET_EMAIL || '').trim().toLowerCase()
@@ -14,14 +14,14 @@ if (!email || password.length < 12) {
   process.exit(1)
 }
 
-await connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 })
+await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 })
 const user = await UserModel.findOne({ email })
 if (!user) {
   console.log(`no user with email ${email}`)
-  await connection.close()
+  await mongoose.connection.close()
   process.exit(1)
 }
 user.password = await bcrypt.hash(password, 10)
 await user.save()
 console.log(`password reset for ${email} (${user.role})`)
-await connection.close()
+await mongoose.connection.close()
