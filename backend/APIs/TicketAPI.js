@@ -15,10 +15,16 @@ import { idOrPublicIdFilter } from '../utils/findByIdOrPublicId.js'
 import { atomicTransition, isValidVersion, VERSION_REQUIRED_MESSAGE } from '../utils/atomicTransition.js'
 import { getPagination, toPage } from '../utils/pagination.js'
 import { asText } from '../utils/queryParams.js'
-import { toTicketView, toTicketListItem } from '../utils/ticketView.js'
+import { toTicketView, toTicketListItem, canSeeInternal } from '../utils/ticketView.js'
 import { TRANSITIONS, isTransitionAllowed, REQUESTER_ONLY_ACTIONS, TEAM_SCOPED_ACTIONS, REOPEN_WINDOW_DAYS } from '../utils/ticketTransitions.js'
 import { createNotification, notifyMany } from '../utils/createNotification.js'
 import { logAudit } from '../utils/logAudit.js'
+import { WorkLogModel } from '../models/WorkLogModel.js'
+import { getTechnicianStats } from '../utils/technicianStats.js'
+import { autoAssignTicket } from '../utils/autoAssign.js'
+import { rankTechnicians, matchedSkills } from '../utils/dsa/techHeap.js'
+import { findSimilar } from '../utils/dsa/similarity.js'
+import { mergeSorted, sortByTime } from '../utils/dsa/timeline.js'
 import { Types } from 'mongoose'
 
 export const ticketApp = exp.Router()
@@ -36,9 +42,14 @@ ticketApp.get('/team-technicians', verifyToken('MANAGER', 'ADMIN'), async (req, 
       return res.status(200).json({ message: 'technicians fetched', payload: [] })
     }
     const department = req.user.role === 'ADMIN' ? asText(req.query.department) : req.user.department
-    const filter = { role: 'TECHNICIAN', isActive: true }
-    if (department) filter.department = department
-    const technicians = await UserModel.find(filter).select('firstName lastName email department')
+    // an Admin without ?department= sees every active technician (no load numbers)
+    if (!department) {
+      const all = await UserModel.find({ role: 'TECHNICIAN', isActive: true }).select('firstName lastName email department skills')
+      //send res
+      return res.status(200).json({ message: 'technicians fetched', payload: all })
+    }
+    const rows = await getTechnicianStats(department)
+    const technicians = rows.map((t) => ({ _id: t.id, firstName: t.firstName, lastName: t.lastName, email: t.email, department, skills: t.skills, openTickets: t.openTickets }))
     //send res
     res.status(200).json({ message: 'technicians fetched', payload: technicians })
   } catch (err) {
@@ -121,8 +132,11 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
 
     await logAudit({ req, action: 'TICKET_CREATED', entityType: 'TICKET', entity: ticket, after: { status, priority: ticket.priority, category: String(category._id) } })
 
+    // categories with autoAssign hand a new OPEN ticket to the best technician straight away
+    const assigned = needsApproval ? null : await autoAssignTicket(ticket)
+
     //send res
-    res.status(201).json({ message: needsApproval ? 'ticket submitted for approval' : 'ticket created', payload: toTicketView(ticket, req.user) })
+    res.status(201).json({ message: needsApproval ? 'ticket submitted for approval' : 'ticket created', payload: toTicketView(assigned ?? ticket, req.user) })
   } catch (err) {
     next(err)
   }
@@ -181,6 +195,108 @@ ticketApp.get('/tickets/:ticketId', verifyToken(...ALL_ROLES), async (req, res, 
 
     //send res
     res.status(200).json({ message: 'ticket fetched', payload: toTicketView(ticket, req.user) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// the ticket as the caller is allowed to see it, or null. The scope and the id
+// filter are ANDed, so a staff user without a team (scope { _id: null }) matches nothing.
+const findScopedTicket = (user, ticketId, select) => {
+  const query = TicketModel.findOne({ $and: [buildTicketQuery(user), idOrPublicIdFilter(ticketId)] })
+  return select ? query.select(select) : query
+}
+
+// DSA: top technicians for this ticket, ranked with a min-heap (lowest open load,
+// then matching skills, then least recently assigned). Manager/Admin, team scoped.
+ticketApp.get('/tickets/:ticketId/suggested-technicians', verifyToken('MANAGER', 'ADMIN'), async (req, res, next) => {
+  try {
+    const ticket = await findScopedTicket(req.user, req.params.ticketId, 'department category publicId')
+    if (!ticket) {
+      //send res
+      return res.status(404).json({ message: 'ticket not found' })
+    }
+    const category = await CategoryModel.findById(ticket.category).select('skills')
+    const wanted = category?.skills ?? []
+    const technicians = await getTechnicianStats(ticket.department)
+    const ranked = rankTechnicians(technicians, wanted, 5).map((t, index) => ({
+      _id: t.id,
+      firstName: t.firstName,
+      lastName: t.lastName,
+      email: t.email,
+      skills: t.skills,
+      openTickets: t.openTickets,
+      matchedSkills: matchedSkills(t, wanted),
+      lastAssignedAt: t.lastAssignedAt,
+      recommended: index === 0,
+    }))
+    //send res
+    res.status(200).json({ message: 'suggested technicians fetched', payload: ranked })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// DSA: similar tickets by Jaccard similarity of their words (titles count double,
+// resolved tickets contribute their resolution summary). Staff only, team scoped.
+const SIMILAR_CANDIDATES = 300
+ticketApp.get('/tickets/:ticketId/similar', verifyToken('TECHNICIAN', 'MANAGER', 'ADMIN'), async (req, res, next) => {
+  try {
+    const ticket = await findScopedTicket(req.user, req.params.ticketId, 'title description publicId')
+    if (!ticket) {
+      //send res
+      return res.status(404).json({ message: 'ticket not found' })
+    }
+    const candidates = await TicketModel.find({ $and: [buildTicketQuery(req.user), { _id: { $ne: ticket._id } }] })
+      .select('publicId title description status priority resolution.summary createdAt')
+      .sort({ createdAt: -1 })
+      .limit(SIMILAR_CANDIDATES)
+      .lean()
+    const matches = findSimilar(ticket, candidates, { threshold: 0.2, limit: 5 }).map(({ ticket: t, score }) => ({
+      publicId: t.publicId,
+      title: t.title,
+      status: t.status,
+      priority: t.priority,
+      score: Math.round(score * 100) / 100,
+      resolutionSummary: t.resolution?.summary ? t.resolution.summary.slice(0, 200) : undefined,
+    }))
+    //send res
+    res.status(200).json({ message: 'similar tickets fetched', payload: matches })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// DSA: one chronological timeline of status changes, comments and work logs,
+// built with a k-way heap merge of the three already-sorted lists. Internal notes
+// only for people who may see them; work logs only for the ticket's own team and Admin.
+ticketApp.get('/tickets/:ticketId/timeline', verifyToken(...ALL_ROLES), async (req, res, next) => {
+  try {
+    const ticket = await findScopedTicket(req.user, req.params.ticketId)
+    if (!ticket) {
+      //send res
+      return res.status(404).json({ message: 'ticket not found' })
+    }
+    const staff = canSeeInternal(ticket, req.user)
+    const workLogs = staff ? await WorkLogModel.find({ ticket: ticket._id }).lean() : []
+
+    const people = new Set()
+    ticket.statusHistory.forEach((h) => h.by && people.add(String(h.by)))
+    ticket.comments.forEach((c) => people.add(String(c.author)))
+    workLogs.forEach((w) => people.add(String(w.technician)))
+    const users = await UserModel.find({ _id: { $in: [...people] } }).select('firstName lastName role').lean()
+    const nameOf = new Map(users.map((u) => [String(u._id), { name: `${u.firstName} ${u.lastName}`, role: u.role }]))
+    const who = (id) => (id ? nameOf.get(String(id)) ?? null : null)
+
+    const history = ticket.statusHistory.map((h) => ({ type: 'STATUS', at: h.at, by: who(h.by), from: h.from, to: h.to, note: h.note }))
+    const comments = ticket.comments
+      .filter((c) => staff || !c.isInternal)
+      .map((c) => ({ type: c.isInternal ? 'INTERNAL_NOTE' : 'COMMENT', at: c.createdAt, by: who(c.author), text: c.text }))
+    const logs = workLogs.map((w) => ({ type: 'WORK_LOG', at: w.createdAt, by: who(w.technician), text: w.description, minutesSpent: w.minutesSpent }))
+
+    const events = mergeSorted([sortByTime(history), sortByTime(comments), sortByTime(logs)])
+    //send res
+    res.status(200).json({ message: 'timeline fetched', payload: events })
   } catch (err) {
     next(err)
   }
@@ -436,6 +552,7 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       set.assignedTo = technician._id
       set.assignedBy = req.user.id
       set.assignedAt = now
+      set.assignmentMethod = 'MANUAL'
       notifications.push({ user: technician._id, type: 'TICKET_ASSIGNED', message: `Ticket ${ticket.publicId} was assigned to you` })
       if (action === 'reassign' && previousAssignee && previousAssignee.toString() !== technician._id.toString()) {
         notifications.push({ user: previousAssignee, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was reassigned to someone else` })
@@ -445,6 +562,7 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       set.assignedTo = req.user.id
       set.assignedBy = req.user.id
       set.assignedAt = now
+      set.assignmentMethod = 'CLAIM'
     }
     if (action === 'start' && !ticket.sla.firstRespondedAt) {
       set['sla.firstRespondedAt'] = now
@@ -528,8 +646,11 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
     // notifications follow the main write; a failure is logged inside createNotification, never fatal
     await Promise.all(notifications.map((n) => createNotification({ ...n, link: `/tickets/${ticket.publicId}` })))
 
+    // an approved ticket is OPEN now, so an autoAssign category assigns it like a new one
+    const assigned = action === 'approve' ? await autoAssignTicket(result.doc) : null
+
     //send res
-    res.status(200).json({ message: `ticket ${action} succeeded`, payload: toTicketView(result.doc, req.user) })
+    res.status(200).json({ message: `ticket ${action} succeeded`, payload: toTicketView(assigned ?? result.doc, req.user) })
   } catch (err) {
     next(err)
   }

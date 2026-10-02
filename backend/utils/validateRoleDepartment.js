@@ -1,13 +1,13 @@
 import { DepartmentModel } from '../models/DepartmentModel.js'
 
 // EMPLOYEE -> an active BUSINESS department; TECHNICIAN/MANAGER -> an active
-// IT_SUPPORT team; ADMIN/ASSET_MANAGER -> department optional. Returns an
-// error message, or null when the pair is valid.
-const REQUIRED_KIND = { EMPLOYEE: 'BUSINESS', TECHNICIAN: 'IT_SUPPORT', MANAGER: 'IT_SUPPORT' }
+// IT_SUPPORT team; ADMIN/ASSET_MANAGER -> no department. Returns an error
+// message, or null when the pair is valid.
+export const REQUIRED_KIND = { EMPLOYEE: 'BUSINESS', TECHNICIAN: 'IT_SUPPORT', MANAGER: 'IT_SUPPORT' }
 
 export const validateRoleDepartment = async (role, department) => {
   const kind = REQUIRED_KIND[role]
-  if (!kind) return null
+  if (!kind) return department ? `${role} does not belong to a department` : null
   if (!department) return `${role} requires a ${kind} department`
   if (typeof department !== 'string') return 'department must be an id'
   const dept = await DepartmentModel.findOne({ _id: department, isActive: true }).select('kind')

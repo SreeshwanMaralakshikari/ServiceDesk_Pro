@@ -6,9 +6,9 @@ import { Schema, model, Types } from 'mongoose'
 const auditLogSchema = new Schema({
   actor:      { type: Types.ObjectId, ref: 'user' }, // empty for system actions
   action:     { type: String, required: true },      // e.g. TICKET_CLAIM, ASSET_ASSIGN, LOGIN
-  entityType: { type: String, required: true },      // TICKET | ASSET | KB_ARTICLE | USER | WORK_LOG
+  entityType: { type: String, required: true },      // TICKET | ASSET | KB_ARTICLE | USER | WORK_LOG | DEPARTMENT | CATEGORY | SLA_POLICY | ORG_SETTINGS
   entityId:   { type: Types.ObjectId },
-  entityRef:  { type: String },                      // readable id, e.g. TKT-2026-00004
+  entityRef:  { type: String },                      // readable id, e.g. TKT-2026-00004, or a code/email for masters
   before:     { type: Schema.Types.Mixed },
   after:      { type: Schema.Types.Mixed },
   ip:         { type: String },

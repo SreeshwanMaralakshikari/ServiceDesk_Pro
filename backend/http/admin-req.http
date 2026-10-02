@@ -19,3 +19,199 @@ GET {{baseUrl}}/admin-api/audit-logs?actor=nope
 
 ### notifications: a malformed id -> 400
 PUT {{baseUrl}}/notification-api/mark-read/not-an-id
+
+###############################################################################
+### ADMIN-COMPLETION: management endpoints (login as admin@sdp.test)
+### Replace PASTE_* with real ids from the list calls. Every write is audited.
+###############################################################################
+
+### users: paginated list; filters role, department, isActive, q (name/email text, not a regex)
+GET {{baseUrl}}/admin-api/users?role=TECHNICIAN&limit=20
+
+###
+GET {{baseUrl}}/admin-api/users?q=theo&isActive=true
+
+### create a technician with skills (skills only allowed for technicians)
+POST {{baseUrl}}/admin-api/users
+Content-Type: application/json
+
+{
+  "firstName": "Sana",
+  "lastName": "Support",
+  "email": "sana@sdp.test",
+  "password": "A-long-password-123",
+  "role": "TECHNICIAN",
+  "department": "PASTE_SERVICE_DESK_DEPARTMENT_ID",
+  "skills": ["vpn", "printer"]
+}
+
+### edit name / role / department / skills (role and department must match: staff need an IT_SUPPORT team, employees a BUSINESS one)
+PATCH {{baseUrl}}/admin-api/users/PASTE_USER_ID
+Content-Type: application/json
+
+{ "skills": ["vpn", "wifi", "outlook"] }
+
+### deactivate / reactivate
+PATCH {{baseUrl}}/admin-api/users/PASTE_USER_ID/status
+Content-Type: application/json
+
+{ "isActive": false }
+
+### --- users: negative cases ---
+### password shorter than 12 -> 400
+POST {{baseUrl}}/admin-api/users
+Content-Type: application/json
+
+{ "firstName": "X", "email": "x@sdp.test", "password": "short", "role": "EMPLOYEE", "department": "PASTE_ENG_DEPARTMENT_ID" }
+
+### duplicate email -> 409
+POST {{baseUrl}}/admin-api/users
+Content-Type: application/json
+
+{ "firstName": "Dup", "email": "tech@sdp.test", "password": "A-long-password-123", "role": "EMPLOYEE", "department": "PASTE_ENG_DEPARTMENT_ID" }
+
+### skills on an employee -> 400
+POST {{baseUrl}}/admin-api/users
+Content-Type: application/json
+
+{ "firstName": "X", "email": "x2@sdp.test", "password": "A-long-password-123", "role": "EMPLOYEE", "department": "PASTE_ENG_DEPARTMENT_ID", "skills": ["vpn"] }
+
+### technician in a BUSINESS department -> 400
+POST {{baseUrl}}/admin-api/users
+Content-Type: application/json
+
+{ "firstName": "X", "email": "x3@sdp.test", "password": "A-long-password-123", "role": "TECHNICIAN", "department": "PASTE_ENG_DEPARTMENT_ID" }
+
+### an admin cannot change their own role (login as admin, use your own id) -> 400
+PATCH {{baseUrl}}/admin-api/users/PASTE_OWN_ADMIN_ID
+Content-Type: application/json
+
+{ "role": "EMPLOYEE" }
+
+### changing the role or department of a technician with open tickets -> 409 (reassign their tickets first)
+### deactivating yourself, or the last active admin -> 400 / 409
+### unknown role (BOSS) or a malformed department id -> 400
+GET {{baseUrl}}/admin-api/users?role=BOSS
+
+###
+GET {{baseUrl}}/admin-api/users?department=nope
+
+### departments: list shows activeUsers and activeCategories
+GET {{baseUrl}}/admin-api/departments
+
+###
+POST {{baseUrl}}/admin-api/departments
+Content-Type: application/json
+
+{ "name": "Facilities", "code": "FAC", "kind": "BUSINESS" }
+
+### rename / set the manager / deactivate (kind never changes after creation)
+PATCH {{baseUrl}}/admin-api/departments/PASTE_DEPARTMENT_ID
+Content-Type: application/json
+
+{ "name": "Facilities & Admin", "manager": "PASTE_MANAGER_USER_ID" }
+
+### --- departments: negative cases ---
+### duplicate name or code -> 409
+POST {{baseUrl}}/admin-api/departments
+Content-Type: application/json
+
+{ "name": "Service Desk", "code": "XYZ", "kind": "IT_SUPPORT" }
+
+### changing kind -> 400. A manager from another department -> 400.
+### deactivating a department that still has active users, active categories or open tickets -> 409
+PATCH {{baseUrl}}/admin-api/departments/PASTE_DEPARTMENT_ID
+Content-Type: application/json
+
+{ "kind": "BUSINESS" }
+
+### categories: list (includes inactive), create, edit. autoAssign + skills drive automatic assignment
+GET {{baseUrl}}/admin-api/categories
+
+###
+POST {{baseUrl}}/admin-api/categories
+Content-Type: application/json
+
+{
+  "name": "Printers",
+  "department": "PASTE_SERVICE_DESK_DEPARTMENT_ID",
+  "ticketType": "INCIDENT",
+  "defaultPriority": "MEDIUM",
+  "autoAssign": true,
+  "skills": ["printer"]
+}
+
+###
+PATCH {{baseUrl}}/admin-api/categories/PASTE_CATEGORY_ID
+Content-Type: application/json
+
+{ "autoAssign": false }
+
+### --- categories: negative cases ---
+### the handling team must be an active IT_SUPPORT department -> 400
+POST {{baseUrl}}/admin-api/categories
+Content-Type: application/json
+
+{ "name": "Bad team", "department": "PASTE_ENG_DEPARTMENT_ID", "ticketType": "INCIDENT", "defaultPriority": "MEDIUM" }
+
+### default priority must be an active policy with level above 0 (TEST is staff-only) -> 400
+POST {{baseUrl}}/admin-api/categories
+Content-Type: application/json
+
+{ "name": "Bad priority", "department": "PASTE_SERVICE_DESK_DEPARTMENT_ID", "ticketType": "INCIDENT", "defaultPriority": "TEST" }
+
+### unknown category id -> 404; moving to another team or deactivating with open tickets -> 409
+PATCH {{baseUrl}}/admin-api/categories/000000000000000000000000
+Content-Type: application/json
+
+{ "autoAssign": true }
+
+### priorities / SLA policies: list includes inactive ones
+GET {{baseUrl}}/admin-api/sla-policies
+
+###
+POST {{baseUrl}}/admin-api/sla-policies
+Content-Type: application/json
+
+{ "priority": "URGENT", "label": "Urgent", "level": 5, "color": "#dc2626", "responseTimeHours": 1, "resolutionTimeHours": 6, "businessHoursOnly": false }
+
+### code and level never change after creation; hours can
+PATCH {{baseUrl}}/admin-api/sla-policies/PASTE_POLICY_ID
+Content-Type: application/json
+
+{ "resolutionTimeHours": 8 }
+
+### --- SLA: negative cases ---
+### resolution shorter than response -> 400
+POST {{baseUrl}}/admin-api/sla-policies
+Content-Type: application/json
+
+{ "priority": "BAD", "label": "Bad", "level": 6, "responseTimeHours": 10, "resolutionTimeHours": 2 }
+
+### duplicate code -> 409; hours of 0 or above 8760 -> 400
+### deactivating a policy that open tickets use, that is a category default, or the last selectable one -> 409
+
+### business hours: validated (days 0-6, HH:mm, start before end). An empty days list used to push every due date 14 days out (F-049).
+PUT {{baseUrl}}/admin-api/org-settings
+Content-Type: application/json
+
+{ "businessHours": { "days": [1, 2, 3, 4, 5], "start": "09:00", "end": "18:00" } }
+
+### --- org-settings: negative cases ---
+### no working days -> 400
+PUT {{baseUrl}}/admin-api/org-settings
+Content-Type: application/json
+
+{ "businessHours": { "days": [], "start": "09:00", "end": "18:00" } }
+
+### start after end -> 400
+PUT {{baseUrl}}/admin-api/org-settings
+Content-Type: application/json
+
+{ "businessHours": { "days": [1, 2, 3], "start": "18:00", "end": "09:00" } }
+
+### /meta-api: only departments is public (BUSINESS ones, for the register form); categories and priorities need a login
+GET {{baseUrl}}/meta-api/departments
+
+###
+GET {{baseUrl}}/meta-api/categories

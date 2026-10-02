@@ -40,7 +40,7 @@ vendorApp.patch('/vendors/:vendorId', async (req, res, next) => {
     const vendor = await VendorModel.findByIdAndUpdate(
       req.params.vendorId,
       { name, contactPerson, email, phone, address, servicesProvided, isActive },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     )
     if (!vendor) {
       //send res

@@ -77,7 +77,7 @@ describe('rules and hardening (real database)', () => {
 
   test('role <-> department kind is validated on admin create and on self-register', async () => {
     const { departments: d } = ctx.fx
-    const create = (body) => admin.post('/admin-api/users').send({ firstName: 'N', password: 'Passw0rd!', ...body })
+    const create = (body) => admin.post('/admin-api/users').send({ firstName: 'N', password: 'Passw0rd!Passw0rd!', ...body })
     assert.equal((await create({ email: 'a1@t.test', role: 'TECHNICIAN', department: String(d.hr._id) })).status, 400, 'technician in a business dept')
     assert.equal((await create({ email: 'a2@t.test', role: 'TECHNICIAN' })).status, 400, 'technician without a dept')
     assert.equal((await create({ email: 'a3@t.test', role: 'MANAGER', department: String(d.hr._id) })).status, 400)
@@ -87,7 +87,7 @@ describe('rules and hardening (real database)', () => {
     assert.equal((await create({ email: 'a7@t.test', role: 'EMPLOYEE', department: String(d.hr._id) })).status, 201)
     assert.equal((await create({ email: 'a8@t.test', role: 'ASSET_MANAGER' })).status, 201, 'department optional')
 
-    const register = (department, email) => anon.post('/auth/users').send({ firstName: 'S', email, password: 'Passw0rd!', department })
+    const register = (department, email) => anon.post('/auth/users').send({ firstName: 'S', email, password: 'Passw0rd!Passw0rd!', department })
     assert.equal((await register(String(d.svc._id), 'r1@t.test')).status, 400, 'self-register into an IT team')
     assert.equal((await register(String(d.hr._id), 'r2@t.test')).status, 201)
   })

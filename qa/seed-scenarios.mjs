@@ -32,6 +32,9 @@ for (const M of [UserModel, DepartmentModel, CategoryModel, SLAPolicyModel, Vend
   M.countDocuments = async () => rows(M).length
 }
 DepartmentModel.findByIdAndUpdate = async () => ({})
+// the one-time DSA top-up of rows that already exist (nothing to update in the in-memory store)
+UserModel.updateOne = async () => ({ modifiedCount: 0 })
+CategoryModel.updateOne = async () => ({ modifiedCount: 0 })
 let kb = []
 Object.defineProperty(globalThis, '__cats', { get: () => rows(CategoryModel), set: (v) => store.set(CategoryModel, v) })
 KnowledgeArticleModel.countDocuments = async () => kb.length
@@ -43,6 +46,8 @@ const statuses = () => kb.reduce((m, a) => ((m[a.status] = (m[a.status] || 0) + 
 const expectedStatuses = { PUBLISHED: 10, DRAFT: 2, ARCHIVED: 1 }
 
 await quiet(seedIfEmpty)
+assert.ok(rows(UserModel).filter((u) => u.role === 'TECHNICIAN' && u.skills?.length).length >= 3, 'A: technicians with skills seeded for the DSA demo')
+assert.ok(rows(CategoryModel).some((c) => c.autoAssign === true && c.skills?.length), 'A: an auto-assign category with skills is seeded')
 assert.equal(kb.length, 13, 'A: 13 articles'); assert.equal(new Set(kb.map((a) => a.publicId)).size, 13, 'A: unique ids')
 assert.deepEqual(statuses(), expectedStatuses, 'A: status mix')
 assert.ok(kb.every((a) => a.tags.every((t) => t === t.toLowerCase().trim())), 'A: tags normalised')

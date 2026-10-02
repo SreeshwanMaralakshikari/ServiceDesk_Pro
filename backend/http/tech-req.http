@@ -1,0 +1,40 @@
+@baseUrl = http://localhost:5000
+
+### technician queue (/tech-api). Login as tech@sdp.test (or tara@ / ravi@ / noor@sdp.test, password Passw0rd!)
+### mine = my active tickets, unassigned = OPEN tickets of my team that nobody has taken.
+### Both lists come back ordered by a min-heap: SLA urgency, soonest due date, higher priority, older first. Each row has an `urgency`.
+GET {{baseUrl}}/tech-api/queue
+
+### --- negative cases ---
+### not logged in -> 401
+### a manager, employee, asset manager or admin -> 403 (the queue is for technicians)
+### a technician with no department -> 200 with { mine: [], unassigned: [] }
+
+###############################################################################
+### DSA ticket endpoints (ticket-api)
+###############################################################################
+
+### suggested technicians (manager of the team or admin): top 5 ranked by a heap
+### (matching skills first when anyone matches, then lowest open load, then least recently assigned).
+GET {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/suggested-technicians
+
+### similar tickets (technician / manager / admin, same team only): Jaccard similarity of the words, best 5 above 0.2
+GET {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/similar
+
+### timeline: status changes + comments + work logs merged in time order (everyone who can open the ticket)
+### internal notes and work logs are only included for the ticket's team and admin
+GET {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/timeline
+
+### team technicians now include skills and openTickets (manager / admin)
+GET {{baseUrl}}/ticket-api/team-technicians
+
+### --- negative cases ---
+### suggested-technicians as employee or technician -> 403
+### similar as employee or asset manager -> 403
+### similar / timeline / suggested for a ticket of another team, or a teamless staff user -> 404
+### timeline as another employee -> 404
+GET {{baseUrl}}/ticket-api/tickets/TKT-0000-00000/timeline
+
+### auto-assign has no endpoint of its own: turn autoAssign on for a category (admin-req.http), then create a ticket in it.
+### The response is already ASSIGNED with assignmentMethod AUTO, and the audit log has TICKET_AUTO_ASSIGNED (no actor).
+### Approval categories assign after the manager approves.

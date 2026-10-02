@@ -2,6 +2,7 @@
 export const styles = {
   page: 'min-h-screen bg-slate-50 text-slate-900',
   container: 'max-w-5xl mx-auto px-4 py-8',
+  containerWide: 'max-w-6xl mx-auto px-4 py-8',
   card: 'bg-white rounded-xl shadow-sm border border-slate-200 p-6',
   h1: 'text-2xl font-semibold text-slate-900 mb-4',
   h2: 'text-lg font-semibold text-slate-800 mb-2',
@@ -18,6 +19,13 @@ export const styles = {
   badge: 'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
   navLink: 'text-sm font-medium text-slate-600 hover:text-indigo-600 transition',
   navLinkActive: 'text-sm font-medium text-indigo-600',
+  tab: 'px-3 py-2 text-sm font-medium text-slate-500 border-b-2 border-transparent hover:text-indigo-600',
+  tabActive: 'px-3 py-2 text-sm font-medium text-indigo-600 border-b-2 border-indigo-600',
+  chip: 'inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-600',
+  fieldError: 'block text-xs text-red-600 mt-1',
+  checkbox: 'h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500',
+  btnLink: 'text-sm text-indigo-600 hover:underline disabled:opacity-40 disabled:no-underline',
+  btnLinkDanger: 'text-sm text-red-600 hover:underline disabled:opacity-40 disabled:no-underline',
 }
 
 export const statusColors = {
@@ -53,4 +61,19 @@ export const kbStatusColors = {
   DRAFT: 'bg-yellow-100 text-yellow-700',
   PUBLISHED: 'bg-green-100 text-green-700',
   ARCHIVED: 'bg-slate-200 text-slate-500',
+}
+
+export const roleColors = {
+  ADMIN: 'bg-red-100 text-red-700',
+  MANAGER: 'bg-purple-100 text-purple-700',
+  TECHNICIAN: 'bg-blue-100 text-blue-700',
+  EMPLOYEE: 'bg-slate-100 text-slate-600',
+  ASSET_MANAGER: 'bg-teal-100 text-teal-700',
+}
+
+// one pair of tokens for every Boolean flag shown as a badge (isActive,
+// requiresApproval, autoAssign, businessHoursOnly)
+export const flagColors = {
+  on: 'bg-green-100 text-green-700',
+  off: 'bg-slate-100 text-slate-500',
 }

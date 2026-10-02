@@ -9,10 +9,18 @@ import { NotFound } from './components/NotFound.jsx'
 import { TicketList } from './components/tickets/TicketList.jsx'
 import { CreateTicket } from './components/tickets/CreateTicket.jsx'
 import { TicketDetail } from './components/tickets/TicketDetail.jsx'
+import { MyQueue } from './components/tech/MyQueue.jsx'
 import { ApprovalsInbox } from './components/tickets/ApprovalsInbox.jsx'
 import { NotificationsPage } from './components/notifications/NotificationsPage.jsx'
 import { ChangePassword } from './components/account/ChangePassword.jsx'
+import { AdminLayout } from './components/admin/AdminLayout.jsx'
 import { AdminDashboard } from './components/admin/AdminDashboard.jsx'
+import { UsersPage } from './components/admin/UsersPage.jsx'
+import { DepartmentsPage } from './components/admin/DepartmentsPage.jsx'
+import { CategoriesPage } from './components/admin/CategoriesPage.jsx'
+import { SlaPage } from './components/admin/SlaPage.jsx'
+import { SettingsPage } from './components/admin/SettingsPage.jsx'
+import { AuditPage } from './components/admin/AuditPage.jsx'
 import { MyAssets } from './components/assets/MyAssets.jsx'
 import { AssetList } from './components/assets/AssetList.jsx'
 import { CreateAsset } from './components/assets/CreateAsset.jsx'
@@ -55,6 +63,12 @@ export const router = createBrowserRouter([
         ],
       },
       {
+        element: <ProtectedRoutes allowedRoles={['TECHNICIAN']} />,
+        children: [
+          { path: 'my-queue', element: <MyQueue /> },
+        ],
+      },
+      {
         element: <ProtectedRoutes allowedRoles={['MANAGER', 'ADMIN']} />,
         children: [
           { path: 'approvals', element: <ApprovalsInbox /> },
@@ -77,7 +91,19 @@ export const router = createBrowserRouter([
       {
         element: <ProtectedRoutes allowedRoles={['ADMIN']} />,
         children: [
-          { path: 'admin', element: <AdminDashboard /> },
+          {
+            path: 'admin',
+            element: <AdminLayout />,
+            children: [
+              { index: true, element: <AdminDashboard /> },
+              { path: 'users', element: <UsersPage /> },
+              { path: 'departments', element: <DepartmentsPage /> },
+              { path: 'categories', element: <CategoriesPage /> },
+              { path: 'sla', element: <SlaPage /> },
+              { path: 'settings', element: <SettingsPage /> },
+              { path: 'audit', element: <AuditPage /> },
+            ],
+          },
         ],
       },
       { path: '*', element: <NotFound /> },

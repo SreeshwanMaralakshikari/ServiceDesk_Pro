@@ -6,6 +6,7 @@ import { verifyToken } from '../middlewares/verifyToken.js'
 import { loginLimiter, loginEmailLimiter, registerLimiter } from '../middlewares/rateLimiters.js'
 import { logAudit } from '../utils/logAudit.js'
 import { validateRoleDepartment } from '../utils/validateRoleDepartment.js'
+import { passwordProblem, MIN_NEW_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from '../utils/passwordRule.js'
 
 export const commonApp = exp.Router()
 
@@ -16,8 +17,6 @@ const cookieOptions = () => ({
   maxAge: 24 * 60 * 60 * 1000, // 1 day, matches JWT_EXPIRES_IN default
 })
 
-// applies to a NEW password only; existing accounts keep theirs until they change it
-const MIN_NEW_PASSWORD_LENGTH = 12
 
 // self-register: always EMPLOYEE, role/department never trusted from elsewhere
 commonApp.post('/users', registerLimiter, async (req, res, next) => {
@@ -30,6 +29,11 @@ commonApp.post('/users', registerLimiter, async (req, res, next) => {
     if (![firstName, email, password, department].every((v) => typeof v === 'string') || (lastName !== undefined && typeof lastName !== 'string')) {
       //send res
       return res.status(400).json({ message: 'firstName, lastName, email, password and department must be text' })
+    }
+    const passwordError = passwordProblem(password)
+    if (passwordError) {
+      //send res
+      return res.status(400).json({ message: passwordError })
     }
     // self-registration is always EMPLOYEE, so the department must be a BUSINESS one
     const deptError = await validateRoleDepartment('EMPLOYEE', department)
@@ -111,9 +115,9 @@ commonApp.put('/password', verifyToken('ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOY
       //send res
       return res.status(400).json({ message: 'currentPassword and newPassword are required' })
     }
-    if (newPassword.length < MIN_NEW_PASSWORD_LENGTH || newPassword.length > 72) {
+    if (newPassword.length < MIN_NEW_PASSWORD_LENGTH || newPassword.length > MAX_PASSWORD_LENGTH) {
       //send res
-      return res.status(400).json({ message: `new password must be ${MIN_NEW_PASSWORD_LENGTH}-72 characters` })
+      return res.status(400).json({ message: `new password must be ${MIN_NEW_PASSWORD_LENGTH}-${MAX_PASSWORD_LENGTH} characters` })
     }
     const user = await UserModel.findById(req.user.id).select('+password')
     const match = await bcrypt.compare(currentPassword, user.password)

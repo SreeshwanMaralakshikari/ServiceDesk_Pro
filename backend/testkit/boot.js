@@ -19,17 +19,25 @@ export const bootApp = async (envOverrides = {}) => {
     ...envOverrides,
   })
 
-  const mongod = await MongoMemoryServer.create()
-  await mongoose.connect(mongod.getUri(), { dbName: 'sdp_integration' })
+  // TEST_MONGO_URI points the tests at a MongoDB you already run (for example
+  // a local mongod) instead of downloading one; each test process gets its own
+  // throwaway database there
+  const external = process.env.TEST_MONGO_URI
+  const mongod = external ? null : await MongoMemoryServer.create()
+  await mongoose.connect(external ?? mongod.getUri(), { dbName: external ? `sdp_it_${process.pid}_${Date.now()}` : 'sdp_integration' })
 
   const { app } = await import('../app.js')
   // build indexes up front so $text searches work in the first test
-  await Promise.all(Object.values(mongoose.models).map((m) => m.init()))
+  const inits = Object.values(mongoose.models).map((m) => m.init())
+  // a MongoDB-compatible server without text indexes (FerretDB) may refuse one
+  if (external) await Promise.allSettled(inits)
+  else await Promise.all(inits)
 
   const fx = await seedFixtures()
   const stop = async () => {
+    if (external) await mongoose.connection.dropDatabase()
     await mongoose.disconnect()
-    await mongod.stop()
+    await mongod?.stop()
   }
   return { app, fx, stop }
 }

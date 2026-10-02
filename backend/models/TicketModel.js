@@ -44,6 +44,7 @@ const ticketSchema = new Schema({
   assignedTo: { type: Types.ObjectId, ref: 'user' },
   assignedBy: { type: Types.ObjectId, ref: 'user' },
   assignedAt: { type: Date },
+  assignmentMethod: { type: String, enum: ['MANUAL', 'CLAIM', 'AUTO'] }, // how the current assignee got the ticket
 
   approval: {
     approvedBy: { type: Types.ObjectId, ref: 'user' },

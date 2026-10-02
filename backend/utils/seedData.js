@@ -228,9 +228,9 @@ export const seedIfEmpty = async () => {
   await ensurePriorities()
 
   const catRows = [
-    { name: 'Hardware', department: depts.SVD._id, ticketType: 'INCIDENT', defaultPriority: 'MEDIUM' },
-    { name: 'Software', department: depts.SVD._id, ticketType: 'INCIDENT', defaultPriority: 'MEDIUM' },
-    { name: 'Network', department: depts.INF._id, ticketType: 'INCIDENT', defaultPriority: 'HIGH' },
+    { name: 'Hardware', department: depts.SVD._id, ticketType: 'INCIDENT', defaultPriority: 'MEDIUM', autoAssign: true, skills: ['hardware', 'laptop', 'printer', 'monitor'] },
+    { name: 'Software', department: depts.SVD._id, ticketType: 'INCIDENT', defaultPriority: 'MEDIUM', autoAssign: true, skills: ['software', 'outlook', 'office'] },
+    { name: 'Network', department: depts.INF._id, ticketType: 'INCIDENT', defaultPriority: 'HIGH', skills: ['network', 'wifi', 'vpn'] },
     { name: 'New Hardware Request', department: depts.SVD._id, ticketType: 'SERVICE_REQUEST', defaultPriority: 'LOW', requiresApproval: true },
   ]
   for (const row of catRows) await ensure(CategoryModel, { name: row.name }, row)
@@ -253,6 +253,23 @@ export const seedIfEmpty = async () => {
   const employee = await user({ firstName: 'Eli', lastName: 'Employee', email: 'employee@sdp.test', role: 'EMPLOYEE', department: depts.ENG._id })
   const assetMgr = await user({ firstName: 'Amy', lastName: 'Assets', email: 'assets@sdp.test', role: 'ASSET_MANAGER' })
   await ensureProductionAdmin() // a developer can also set SEED_ADMIN_PASSWORD locally
+
+  // DSA demo data: more technicians with skills, so auto-assign and the suggested
+  // technician have something to rank. New rows get their skills from the lists above and
+  // below; rows that already exist (an older database) are configured once, while the
+  // field was never stored, and never overwritten after that.
+  await user({ firstName: 'Tara', lastName: 'Tech', email: 'tara@sdp.test', role: 'TECHNICIAN', department: depts.SVD._id, skills: ['software', 'outlook', 'office', 'vpn'] })
+  await user({ firstName: 'Ravi', lastName: 'Tech', email: 'ravi@sdp.test', role: 'TECHNICIAN', department: depts.SVD._id, skills: ['hardware', 'laptop', 'monitor'] })
+  await user({ firstName: 'Noor', lastName: 'Network', email: 'noor@sdp.test', role: 'TECHNICIAN', department: depts.INF._id, skills: ['network', 'wifi', 'vpn', 'firewall'] })
+  await UserModel.updateOne({ _id: tech._id, skills: { $exists: false } }, { $set: { skills: ['hardware', 'laptop', 'printer'] } })
+  const dsaCategories = [
+    { name: 'Hardware', autoAssign: true, skills: ['hardware', 'laptop', 'printer', 'monitor'] },
+    { name: 'Software', autoAssign: true, skills: ['software', 'outlook', 'office'] },
+    { name: 'Network', autoAssign: false, skills: ['network', 'wifi', 'vpn'] },
+  ]
+  for (const row of dsaCategories) {
+    await CategoryModel.updateOne({ name: row.name, autoAssign: { $exists: false } }, { $set: { autoAssign: row.autoAssign, skills: row.skills } })
+  }
 
   // only set the department manager when none is set yet
   if (!depts.SVD.manager) await DepartmentModel.findByIdAndUpdate(depts.SVD._id, { manager: manager._id })

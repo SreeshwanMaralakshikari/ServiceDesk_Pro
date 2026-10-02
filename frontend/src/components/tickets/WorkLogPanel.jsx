@@ -10,7 +10,7 @@ const formatMinutes = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `$
 // time spent on the ticket. Visible to the ticket's team and Admin (the API
 // answers 404 to anyone else, in which case the panel simply does not render);
 // only the assigned technician gets the form.
-export const WorkLogPanel = ({ ticket, canAdd }) => {
+export const WorkLogPanel = ({ ticket, canAdd, onChanged }) => {
   const { data, loading, error, reload } = useFetch(`/worklog-api/${ticket.publicId}`, { limit: 50 })
   const [description, setDescription] = useState('')
   const [minutes, setMinutes] = useState('')
@@ -30,6 +30,7 @@ export const WorkLogPanel = ({ ticket, canAdd }) => {
       setDescription('')
       setMinutes('')
       reload()
+      onChanged?.()
     } catch (err) {
       toast.error(getErrorMessage(err, 'Failed to add work log'))
     } finally {

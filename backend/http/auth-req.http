@@ -1,6 +1,6 @@
 @baseUrl = http://localhost:5000
 
-### register (employee)
+### register (employee). The password must be 12-72 characters (a short one -> 400)
 POST {{baseUrl}}/auth/users
 Content-Type: application/json
 
@@ -8,7 +8,7 @@ Content-Type: application/json
   "firstName": "Test",
   "lastName": "User",
   "email": "testuser@sdp.test",
-  "password": "Passw0rd!",
+  "password": "A-long-password-123",
   "department": "PASTE_ENG_DEPARTMENT_ID"
 }
 

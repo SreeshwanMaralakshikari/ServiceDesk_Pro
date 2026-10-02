@@ -9,6 +9,8 @@ import { getErrorMessage } from '../../utils/errors.js'
 import { CsatPanel } from './CsatPanel.jsx'
 import { WorkLogPanel } from './WorkLogPanel.jsx'
 import { AuditPanel } from './AuditPanel.jsx'
+import { TimelinePanel } from './TimelinePanel.jsx'
+import { SimilarPanel } from './SimilarPanel.jsx'
 
 // actions that need a required text reason/note alongside them
 const NOTE_REQUIRED_ACTIONS = ['reject', 'cancel', 'hold', 'reopen']
@@ -43,6 +45,8 @@ const actionsFor = (ticket, user) => {
   return options
 }
 
+const ASSIGN_METHOD = { AUTO: 'auto-assigned', MANUAL: 'assigned by a manager', CLAIM: 'claimed' }
+
 const ACTION_LABELS = {
   approve: 'Approve', reject: 'Reject', cancel: 'Cancel', assign: 'Assign',
   reassign: 'Reassign', claim: 'Claim', start: 'Start work', hold: 'Put on hold',
@@ -65,11 +69,13 @@ export const TicketDetail = () => {
   const [resolutionSummary, setResolutionSummary] = useState('')
   const [noteDrafts, setNoteDrafts] = useState({})
   const [technicianPick, setTechnicianPick] = useState('')
+  const [reloadKey, setReloadKey] = useState(0) // bumps on every reload so the timeline refetches
+  const [suggested, setSuggested] = useState([]) // ranked technicians for the assign form
   const [kbSuggestions, setKbSuggestions] = useState(null) // { matchedBy, articles } | null while loading or unavailable
 
   const load = useCallback(() => {
     axiosInstance.get(`/ticket-api/tickets/${ticketId}`)
-      .then(({ data }) => setTicket(data.payload))
+      .then(({ data }) => { setTicket(data.payload); setReloadKey((n) => n + 1) })
       .catch((err) => toast.error(getErrorMessage(err, 'Failed to load ticket')))
       .finally(() => setLoading(false))
   }, [ticketId])
@@ -95,6 +101,18 @@ export const TicketDetail = () => {
       axiosInstance.get('/meta-api/priorities').then(({ data }) => setPriorities(data.payload)).catch(() => {})
     }
   }, [user])
+
+  // heap-ranked technicians for this ticket (lowest load, matching skills first),
+  // fetched while the ticket still needs somebody
+  const needsAssignee = ticket && ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REOPENED'].includes(ticket.status)
+  useEffect(() => {
+    if (!ticket || !needsAssignee || !(user?.role === 'MANAGER' || user?.role === 'ADMIN')) { setSuggested([]); return }
+    let cancelled = false
+    axiosInstance.get(`/ticket-api/tickets/${ticketId}/suggested-technicians`)
+      .then(({ data }) => { if (!cancelled) setSuggested(data.payload) })
+      .catch(() => { if (!cancelled) setSuggested([]) })
+    return () => { cancelled = true }
+  }, [ticket?._id, ticket?.version, needsAssignee, user?.role, ticketId])
 
   const changePriority = async () => {
     if (!priorityPick || priorityPick === ticket.priority) return
@@ -179,7 +197,7 @@ export const TicketDetail = () => {
         <p className="text-sm text-slate-500 mb-2">
           Requested by {ticket.requester?.firstName} {ticket.requester?.lastName} ·
           {' '}Category: {ticket.category?.name} ·
-          {' '}Assigned to: {ticket.assignedTo ? `${ticket.assignedTo.firstName} ${ticket.assignedTo.lastName}` : 'unassigned'}
+          {' '}Assigned to: {ticket.assignedTo ? `${ticket.assignedTo.firstName} ${ticket.assignedTo.lastName}${ASSIGN_METHOD[ticket.assignmentMethod] ? ` (${ASSIGN_METHOD[ticket.assignmentMethod]})` : ''}` : 'unassigned'}
         </p>
         {canChangePriority && (
           <div className="flex items-center gap-2 mb-2">
@@ -210,11 +228,18 @@ export const TicketDetail = () => {
               </form>
             )}
 
+            {actions.some((a) => ASSIGN_ACTIONS.includes(a)) && suggested[0] && (
+              <p className="text-sm text-slate-600" data-testid="suggestion">
+                Suggested: <strong>{suggested[0].firstName} {suggested[0].lastName}</strong>
+                {' '}({suggested[0].openTickets} open{suggested[0].matchedSkills.length > 0 ? `, skills: ${suggested[0].matchedSkills.join(', ')}` : ''})
+                {technicianPick !== suggested[0]._id && <button type="button" className={styles.btnLink + ' ml-2'} onClick={() => setTechnicianPick(suggested[0]._id)}>Use suggestion</button>}
+              </p>
+            )}
             {actions.filter((a) => ASSIGN_ACTIONS.includes(a)).map((action) => (
               <form key={action} onSubmit={(e) => { e.preventDefault(); if (!technicianPick) return toast.error('Pick a technician first'); runAction(action, { technicianId: technicianPick }) }} className="flex gap-2">
                 <select className={styles.select} value={technicianPick} onChange={(e) => setTechnicianPick(e.target.value)}>
                   <option value="">Select technician…</option>
-                  {technicians.map((t) => <option key={t._id} value={t._id}>{t.firstName} {t.lastName}</option>)}
+                  {technicians.map((t) => <option key={t._id} value={t._id}>{t.firstName} {t.lastName}{Number.isInteger(t.openTickets) ? ` (${t.openTickets} open)` : ''}</option>)}
                 </select>
                 <button className={styles.btnPrimary} type="submit">{ACTION_LABELS[action]}</button>
               </form>
@@ -243,8 +268,10 @@ export const TicketDetail = () => {
         )}
 
         <CsatPanel ticket={ticket} isRequester={isRequester} onSaved={load} />
-        {isStaff && <WorkLogPanel ticket={ticket} canAdd={user.role === 'TECHNICIAN' && isAssignee && !isFinished} />}
+        {isStaff && <WorkLogPanel ticket={ticket} canAdd={user.role === 'TECHNICIAN' && isAssignee && !isFinished} onChanged={() => setReloadKey((n) => n + 1)} />}
         {user.role === 'ADMIN' && <AuditPanel ticket={ticket} />}
+
+        {isStaff && <SimilarPanel ticket={ticket} />}
 
         {isStaff && kbSuggestions?.articles?.length > 0 && (
           <div className="mb-6 border-t border-slate-100 pt-4">
@@ -263,17 +290,7 @@ export const TicketDetail = () => {
         )}
 
         <h2 className={styles.h2}>Timeline & comments</h2>
-        <ul className="space-y-2 mb-4">
-          {ticket.comments?.map((c, i) => (
-            <li key={i} className={`rounded-lg p-3 text-sm ${c.isInternal ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
-              <p className="font-medium text-slate-700">
-                {c.author?.firstName} {c.author?.lastName} {c.isInternal && <span className="text-amber-600">(internal)</span>}
-              </p>
-              <p className="text-slate-600">{c.text}</p>
-            </li>
-          ))}
-          {(!ticket.comments || ticket.comments.length === 0) && <p className="text-slate-400 text-sm">No comments yet.</p>}
-        </ul>
+        <TimelinePanel ticket={ticket} reloadKey={reloadKey} />
 
         {isFinished ? (
           <p className="text-sm text-slate-400">This ticket is {ticket.status.toLowerCase()}, so no more comments can be added.</p>

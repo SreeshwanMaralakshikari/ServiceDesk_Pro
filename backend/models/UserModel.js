@@ -7,6 +7,7 @@ const userSchema = new Schema({
   password:    { type: String, required: [true, 'Password is required'], select: false },
   role:        { type: String, enum: ['ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOYEE', 'ASSET_MANAGER'], required: [true, '{VALUE} is not a valid role'] },
   department:  { type: Types.ObjectId, ref: 'department' },
+  skills:      { type: [String], default: [] }, // technician tags, used by auto-assign
   isActive:    { type: Boolean, default: true },
   profileImageUrl: { type: String },
 }, {

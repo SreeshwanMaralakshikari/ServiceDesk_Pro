@@ -22,6 +22,7 @@ export const Header = () => {
           {isAuthenticated ? (
             <>
               {user?.role !== 'ASSET_MANAGER' && <Link to="/tickets" className={styles.navLink}>My Tickets</Link>}
+              {user?.role === 'TECHNICIAN' && <Link to="/my-queue" className={styles.navLink}>My Queue</Link>}
               {(user?.role === 'MANAGER' || user?.role === 'ADMIN') && <Link to="/approvals" className={styles.navLink}>Approvals</Link>}
               <Link to="/kb" className={styles.navLink}>Knowledge Base</Link>
               <Link to="/my-assets" className={styles.navLink}>My Assets</Link>
