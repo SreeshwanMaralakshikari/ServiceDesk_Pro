@@ -1,21 +1,35 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { axiosInstance } from '../../axiosInstance.js'
-import { styles, statusColors, priorityColors } from '../../styles/common.js'
-import { getSlaStatus } from '../../utils/sla.js'
+import { useFetch } from '../../hooks/useFetch.js'
+import { DataTable } from '../common/DataTable.jsx'
+import { StatusBadge, PriorityBadge, SLABadge } from '../common/Badges.jsx'
+import { styles, statusColors } from '../../styles/common.js'
+
+const STATUSES = Object.keys(statusColors)
+const PAGE_SIZE = 15
 
 export const TicketList = () => {
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [page, setPage] = useState(1)
+  const [status, setStatus] = useState('')
+  const [search, setSearch] = useState('')
+  const [q, setQ] = useState('') // applied search, so typing does not fire a request per key
   const navigate = useNavigate()
+  const { data, loading, error } = useFetch('/ticket-api/tickets', { page, limit: PAGE_SIZE, status: status || undefined, q: q || undefined })
 
-  useEffect(() => {
-    axiosInstance.get('/ticket-api/tickets')
-      .then(({ data }) => setItems(data.payload.items))
-      .catch((err) => setError(err.response?.data?.message || 'Failed to load tickets'))
-      .finally(() => setLoading(false))
-  }, [])
+  const columns = [
+    { key: 'publicId', header: 'ID', render: (t) => <span className="font-mono text-xs">{t.publicId}</span> },
+    { key: 'title', header: 'Title' },
+    { key: 'category', header: 'Category', render: (t) => t.category?.name },
+    { key: 'priority', header: 'Priority', render: (t) => <PriorityBadge priority={t.priority} /> },
+    { key: 'status', header: 'Status', render: (t) => <StatusBadge status={t.status} /> },
+    { key: 'sla', header: 'SLA', render: (t) => <SLABadge ticket={t} /> },
+  ]
+
+  const applySearch = (e) => {
+    e.preventDefault()
+    setPage(1)
+    setQ(search.trim())
+  }
 
   return (
     <div className={styles.container}>
@@ -24,38 +38,19 @@ export const TicketList = () => {
         <Link to="/tickets/new" className={styles.btnPrimary}>+ New ticket</Link>
       </div>
       <div className={styles.card}>
-        {loading && <p className="text-slate-500">Loading…</p>}
-        {error && <p className="text-red-600">{error}</p>}
-        {!loading && !error && items.length === 0 && <p className="text-slate-500">No tickets yet.</p>}
-        {!loading && items.length > 0 && (
-          <table className={styles.table}>
-            <thead>
-              <tr className={styles.tableHeadRow}>
-                <th className="py-2">ID</th>
-                <th className="py-2">Title</th>
-                <th className="py-2">Category</th>
-                <th className="py-2">Priority</th>
-                <th className="py-2">Status</th>
-                <th className="py-2">SLA</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((t) => {
-                const sla = getSlaStatus(t)
-                return (
-                  <tr key={t._id} className={styles.tableRow} onClick={() => navigate(`/tickets/${t.publicId}`)}>
-                    <td className="py-2 font-mono text-xs">{t.publicId}</td>
-                    <td className="py-2">{t.title}</td>
-                    <td className="py-2">{t.category?.name}</td>
-                    <td className="py-2"><span className={`${styles.badge} ${priorityColors[t.priority] || ''}`}>{t.priority}</span></td>
-                    <td className="py-2"><span className={`${styles.badge} ${statusColors[t.status] || ''}`}>{t.status}</span></td>
-                    <td className="py-2">{sla ? <span className={`${styles.badge} ${sla.className}`}>{sla.label}</span> : <span className="text-slate-300 text-xs">—</span>}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
+        <form onSubmit={applySearch} className="flex flex-wrap items-center gap-2 mb-4">
+          <input className={styles.input + ' max-w-xs'} placeholder="Search title or description…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <select className={styles.select + ' max-w-[12rem]'} value={status} onChange={(e) => { setPage(1); setStatus(e.target.value) }} aria-label="Filter by status">
+            <option value="">All statuses</option>
+            {STATUSES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+          </select>
+          <button className={styles.btnSecondary} type="submit">Search</button>
+          {(q || status) && <button type="button" className="text-sm text-indigo-600 hover:underline" onClick={() => { setSearch(''); setQ(''); setStatus(''); setPage(1) }}>Clear</button>}
+        </form>
+        <DataTable columns={columns} rows={data?.items} loading={loading} error={error}
+          onRowClick={(t) => navigate(`/tickets/${t.publicId}`)}
+          page={data?.page} totalPages={data?.totalPages} total={data?.total} onPageChange={setPage}
+          emptyTitle="No tickets found" emptyHint={q || status ? 'Try clearing the filters.' : 'Create one with “New ticket”.'} />
       </div>
     </div>
   )

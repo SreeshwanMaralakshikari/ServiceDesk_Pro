@@ -1,4 +1,5 @@
 import exp from 'express'
+import { isValidObjectId } from 'mongoose'
 import { NotificationModel } from '../models/NotificationModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
 import { getPagination, toPage } from '../utils/pagination.js'
@@ -29,6 +30,10 @@ notificationApp.get('/unread-count', async (req, res, next) => {
 
 notificationApp.put('/mark-read/:id', async (req, res, next) => {
   try {
+    if (!isValidObjectId(req.params.id)) {
+      //send res
+      return res.status(400).json({ message: 'invalid notification id' })
+    }
     await NotificationModel.updateOne({ _id: req.params.id, user: req.user.id }, { isRead: true })
     //send res
     res.status(200).json({ message: 'marked read' })

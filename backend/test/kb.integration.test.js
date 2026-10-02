@@ -108,6 +108,7 @@ describe('real server.js + KB (only DB/cron stubbed)', () => {
     K = (await import('../models/KnowledgeArticleModel.js')).KnowledgeArticleModel
     C = (await import('../models/CategoryModel.js')).CategoryModel
     U = (await import('../models/UserModel.js')).UserModel
+    ;(await import('../models/AuditLogModel.js')).AuditLogModel.create = async () => ({}) // no database here
     saved.K = { findOneAndUpdate: K.findOneAndUpdate, find: K.find, findOne: K.findOne, countDocuments: K.countDocuments, updateOne: K.updateOne, create: K.create }
     saved.C = { findOne: C.findOne }; saved.U = { findById: U.findById }
 

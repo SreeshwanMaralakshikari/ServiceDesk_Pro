@@ -86,6 +86,19 @@ const ticketSchema = new Schema({
     confirmedAt:        { type: Date },
   },
 
+  // how and when the ticket was closed. Cleared again on reopen. DUPLICATE and
+  // AUTO_CLOSED are reserved for the duplicate-linking / auto-close features
+  closeReason: { type: String, enum: ['CONFIRMED', 'DUPLICATE', 'AUTO_CLOSED'] },
+  closedAt:    { type: Date },
+
+  // requester satisfaction, only for CLOSED + CONFIRMED. A rating after a
+  // reopen and re-close overwrites the old one (dashboards use the latest)
+  csat: {
+    rating:      { type: Number, min: 1, max: 5 },
+    comment:     { type: String, maxlength: 500 },
+    submittedAt: { type: Date },
+  },
+
   reopenCount: { type: Number, default: 0 },
   version:     { type: Number, default: 0 }, // optimistic concurrency guard
   isDeleted:   { type: Boolean, default: false },

@@ -55,3 +55,12 @@ Content-Type: application/json
 
 ### health: db, cron and version (no login). Live: https://<vercel-app>/api/health
 GET {{baseUrl}}/health
+
+### change password: new password must be 12-72 characters -> 400 otherwise
+PUT {{baseUrl}}/auth/password
+Content-Type: application/json
+
+{ "currentPassword": "Passw0rd!", "newPassword": "short" }
+
+### the same account is also limited per email: 20 wrong passwords in 15 minutes -> 429
+### (even from different IP addresses), on top of the 10-per-IP limit above

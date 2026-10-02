@@ -1,4 +1,5 @@
 import exp from 'express'
+import { isValidObjectId } from 'mongoose'
 import { UserModel } from '../models/UserModel.js'
 import { DepartmentModel } from '../models/DepartmentModel.js'
 import { CategoryModel } from '../models/CategoryModel.js'
@@ -7,6 +8,10 @@ import { TicketModel } from '../models/TicketModel.js'
 import { getOrgSettings } from '../models/OrgSettingsModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
 import { validateRoleDepartment } from '../utils/validateRoleDepartment.js'
+import { logAudit } from '../utils/logAudit.js'
+import { AuditLogModel } from '../models/AuditLogModel.js'
+import { getPagination, toPage } from '../utils/pagination.js'
+import { asText } from '../utils/queryParams.js'
 
 export const adminApp = exp.Router()
 adminApp.use(verifyToken('ADMIN'))
@@ -41,6 +46,7 @@ adminApp.post('/users', async (req, res, next) => {
     const hashed = await bcrypt.hash(password, 10)
     const user = await UserModel.create({ firstName, lastName, email, password: hashed, role, department })
     const safe = user.toObject(); delete safe.password
+    await logAudit({ req, action: 'USER_CREATED', entityType: 'USER', entity: user, after: { role, department: department ?? null } })
     //send res
     res.status(201).json({ message: 'user created', payload: safe })
   } catch (err) { next(err) }
@@ -62,8 +68,32 @@ adminApp.patch('/users/:userId/status', async (req, res, next) => {
       //send res
       return res.status(404).json({ message: 'user not found' })
     }
+    await logAudit({ req, action: 'USER_STATUS_CHANGED', entityType: 'USER', entity: user, after: { isActive } })
     //send res
     res.status(200).json({ message: 'user status updated', payload: user })
+  } catch (err) { next(err) }
+})
+
+// --- audit trail (read-only; entries are immutable) ---
+// filters: entityType, entityRef (e.g. TKT-2026-00004), action, actor
+adminApp.get('/audit-logs', async (req, res, next) => {
+  try {
+    const paging = getPagination(req.query)
+    const filter = {}
+    for (const key of ['entityType', 'entityRef', 'action', 'actor']) {
+      const value = asText(req.query[key])
+      if (value) filter[key] = value
+    }
+    if (filter.actor && !isValidObjectId(filter.actor)) {
+      //send res
+      return res.status(400).json({ message: 'actor must be a user id' })
+    }
+    const [items, total] = await Promise.all([
+      AuditLogModel.find(filter).populate('actor', 'firstName lastName email role').sort({ createdAt: -1, _id: -1 }).skip(paging.skip).limit(paging.limit),
+      AuditLogModel.countDocuments(filter),
+    ])
+    //send res
+    res.status(200).json({ message: 'audit logs fetched', payload: toPage(items, total, paging) })
   } catch (err) { next(err) }
 })
 

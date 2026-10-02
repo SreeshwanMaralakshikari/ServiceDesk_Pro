@@ -24,7 +24,7 @@ describe('ticket visibility (real database)', () => {
     const { fx } = ctx
     let t = await createTicket(emp, fx.categories.hardware._id)
     assert.equal((await comment(tech, t, 'INTERNAL: suspect the mainboard', true)).status, 201)
-    assert.equal((await comment(tech, t, 'Hi, we are looking into it', false)).status, 201)
+    assert.equal((await comment(mgr, t, 'Hi, we are looking into it', false)).status, 201) // a team technician who is not assigned can only add internal notes
     assert.equal((await comment(emp, t, 'Thanks!', true)).status, 201) // an employee cannot make a note internal
     assert.equal((await comment(emp2, t, 'let me in', false)).status, 403)
 

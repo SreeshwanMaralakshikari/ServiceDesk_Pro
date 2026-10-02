@@ -18,6 +18,8 @@ import { asText } from '../utils/queryParams.js'
 import { toTicketView, toTicketListItem } from '../utils/ticketView.js'
 import { TRANSITIONS, isTransitionAllowed, REQUESTER_ONLY_ACTIONS, TEAM_SCOPED_ACTIONS, REOPEN_WINDOW_DAYS } from '../utils/ticketTransitions.js'
 import { createNotification, notifyMany } from '../utils/createNotification.js'
+import { logAudit } from '../utils/logAudit.js'
+import { Types } from 'mongoose'
 
 export const ticketApp = exp.Router()
 
@@ -117,6 +119,8 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
       })
     }
 
+    await logAudit({ req, action: 'TICKET_CREATED', entityType: 'TICKET', entity: ticket, after: { status, priority: ticket.priority, category: String(category._id) } })
+
     //send res
     res.status(201).json({ message: needsApproval ? 'ticket submitted for approval' : 'ticket created', payload: toTicketView(ticket, req.user) })
   } catch (err) {
@@ -189,6 +193,9 @@ ticketApp.get('/tickets/:ticketId', verifyToken(...ALL_ROLES), async (req, res, 
 // would match /tickets/:id/priority as :action="priority" and reject it
 // as an unknown transition.
 const CLOSED_STATUSES = ['RESOLVED', 'CLOSED', 'CANCELLED', 'REJECTED']
+// no comment or work log can be added once the ticket is finished (RESOLVED still
+// allows a reply, because the requester may answer before confirming or reopening)
+const FINISHED_STATUSES = ['CLOSED', 'CANCELLED', 'REJECTED']
 const PRIORITY_EDITABLE_STATUSES = ['PENDING_APPROVAL', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REOPENED']
 ticketApp.patch('/tickets/:ticketId/priority', verifyToken('MANAGER', 'ADMIN'), async (req, res, next) => {
   try {
@@ -245,6 +252,7 @@ ticketApp.patch('/tickets/:ticketId/priority', verifyToken('MANAGER', 'ADMIN'), 
       //send res
       return res.status(result.error.status).json({ message: result.error.message })
     }
+    await logAudit({ req, action: 'TICKET_PRIORITY_CHANGED', entityType: 'TICKET', entity: result.doc, before: { priority: previousPriority, version }, after: { priority: result.doc.priority, version: result.doc.version } })
     //send res
     res.status(200).json({ message: 'priority updated', payload: toTicketView(result.doc, req.user) })
   } catch (err) {
@@ -344,7 +352,7 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
     // extra reopen guard: a CLOSED ticket can only be reopened within
     // REOPEN_WINDOW_DAYS of confirmation (RESOLVED has no such window)
     if (action === 'reopen' && ticket.status === 'CLOSED') {
-      const closedAt = ticket.resolution?.confirmedAt
+      const closedAt = ticket.closedAt ?? ticket.resolution?.confirmedAt // confirmedAt covers tickets closed before closedAt existed
       const withinWindow = closedAt && (Date.now() - closedAt.getTime()) <= REOPEN_WINDOW_DAYS * 24 * 60 * 60 * 1000
       if (!withinWindow) {
         //send res
@@ -443,6 +451,7 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
     }
     if (action === 'hold') {
       set['sla.pausedAt'] = now
+      notifications.push({ user: ticket.requester, type: 'TICKET_ON_HOLD', message: `Ticket ${ticket.publicId} was put on hold: ${note}` })
     }
     if (action === 'resume' && ticket.sla.pausedAt) {
       const policy = ticket.sla.policy ? await SLAPolicyModel.findById(ticket.sla.policy) : null
@@ -462,11 +471,16 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       set['resolution.summary'] = resolutionSummary
       set['resolution.resolvedBy'] = req.user.id
       set['resolution.resolvedAt'] = now
-      notifications.push({ user: ticket.requester, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was marked resolved — please confirm` })
+      notifications.push({ user: ticket.requester, type: 'RESOLUTION_PENDING', message: `Ticket ${ticket.publicId} was marked resolved — please confirm` })
     }
     if (action === 'confirm') {
       set['resolution.confirmedByRequester'] = true
       set['resolution.confirmedAt'] = now
+      set.closeReason = 'CONFIRMED'
+      set.closedAt = now
+      if (ticket.assignedTo) {
+        notifications.push({ user: ticket.assignedTo, type: 'TICKET_CLOSED', message: `Ticket ${ticket.publicId} was confirmed and closed by the requester` })
+      }
     }
     if (action === 'reopen') {
       // new SLA cycle from now — response SLA isn't re-run (first response
@@ -489,6 +503,8 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       unset['resolution.resolvedBy'] = ''
       unset['resolution.resolvedAt'] = ''
       unset['resolution.confirmedAt'] = ''
+      unset.closeReason = '' // the old csat stays until a new rating overwrites it
+      unset.closedAt = ''
       if (ticket.assignedTo) {
         notifications.push({ user: ticket.assignedTo, type: 'TICKET_REOPENED', message: `Ticket ${ticket.publicId} was reopened: ${note}` })
       }
@@ -504,6 +520,11 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       return res.status(result.error.status).json({ message: result.error.message })
     }
 
+    await logAudit({
+      req, action: `TICKET_${action.toUpperCase()}`, entityType: 'TICKET', entity: result.doc,
+      before: { status: from, assignedTo: ticket.assignedTo ? String(ticket.assignedTo) : null, version },
+      after: { status: result.doc.status, assignedTo: result.doc.assignedTo ? String(result.doc.assignedTo) : null, version: result.doc.version, ...(note ? { note } : {}) },
+    })
     // notifications follow the main write; a failure is logged inside createNotification, never fatal
     await Promise.all(notifications.map((n) => createNotification({ ...n, link: `/tickets/${ticket.publicId}` })))
 
@@ -514,7 +535,11 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
   }
 })
 
-// comments
+// comments (§6b): public comments from the requester, the assigned technician,
+// the team Manager and Admin; any other technician of the team may add internal
+// notes only. Nothing can be added to a CLOSED/CANCELLED/REJECTED ticket.
+// A comment is one atomic $push and does not bump `version` (it is not a status
+// change, so it must not make a concurrent transition fail with 409).
 ticketApp.post('/tickets/:ticketId/comments', verifyToken(...ALL_ROLES), async (req, res, next) => {
   try {
     const { text, isInternal } = req.body ?? {}
@@ -522,25 +547,117 @@ ticketApp.post('/tickets/:ticketId/comments', verifyToken(...ALL_ROLES), async (
       //send res
       return res.status(400).json({ message: 'comment text is required' })
     }
+    if (text.length > 2000) {
+      //send res
+      return res.status(400).json({ message: 'comment must be 2000 characters or fewer' })
+    }
     const ticket = await TicketModel.findOne({ ...idOrPublicIdFilter(req.params.ticketId), isDeleted: false })
     if (!ticket) {
       //send res
       return res.status(404).json({ message: 'ticket not found' })
     }
-    const canComment = req.user.role === 'ADMIN'
-      || req.user.id === ticket.requester.toString()
-      || req.user.id === ticket.assignedTo?.toString()
-      || ((req.user.role === 'TECHNICIAN' || req.user.role === 'MANAGER') && req.user.department === ticket.department.toString())
-    if (!canComment) {
+    const isRequester = req.user.id === ticket.requester.toString()
+    const isAssignee = req.user.id === ticket.assignedTo?.toString()
+    const isTeamStaff = (req.user.role === 'TECHNICIAN' || req.user.role === 'MANAGER') && req.user.department === ticket.department.toString()
+    const isAdmin = req.user.role === 'ADMIN'
+    if (!isRequester && !isAssignee && !isTeamStaff && !isAdmin) {
       //send res
       return res.status(403).json({ message: 'not authorized to comment on this ticket' })
     }
     // employees can never post internal notes
     const internal = req.user.role === 'EMPLOYEE' ? false : Boolean(isInternal)
-    ticket.comments.push({ author: req.user.id, text, isInternal: internal })
-    await ticket.save()
+    // a team technician who is not assigned may only leave internal notes
+    const mayPostPublic = isRequester || isAssignee || isAdmin || (isTeamStaff && req.user.role === 'MANAGER')
+    if (!internal && !mayPostPublic) {
+      //send res
+      return res.status(403).json({ message: 'only the assigned technician, the team manager or an admin can reply publicly; you can add an internal note' })
+    }
+    if (FINISHED_STATUSES.includes(ticket.status)) {
+      //send res
+      return res.status(400).json({ message: `cannot comment on a ${ticket.status} ticket` })
+    }
+
+    const comment = { _id: new Types.ObjectId(), author: req.user.id, text: text.trim(), isInternal: internal, createdAt: new Date(), updatedAt: new Date() }
+    const written = await TicketModel.updateOne(
+      { _id: ticket._id, isDeleted: false, status: { $nin: FINISHED_STATUSES } },
+      { $push: { comments: comment } },
+    )
+    if (written.matchedCount === 0) {
+      //send res
+      return res.status(409).json({ message: 'ticket changed while you were commenting, please refresh' })
+    }
+
+    // the assigned technician's first public reply is the "first response"
+    // for the response SLA; the filter keeps the earliest time
+    if (isAssignee && !internal && !ticket.sla?.firstRespondedAt) {
+      await TicketModel.updateOne({ _id: ticket._id, 'sla.firstRespondedAt': { $exists: false } }, { $set: { 'sla.firstRespondedAt': new Date() } })
+    }
+
+    // who hears about it: public -> the other side; internal -> the assignee only
+    const recipients = internal
+      ? [ticket.assignedTo]
+      : [ticket.requester, ticket.assignedTo]
+    const link = `/tickets/${ticket.publicId}`
+    await Promise.all(recipients
+      .filter((id) => id && id.toString() !== req.user.id)
+      .map((id) => createNotification({ user: id, type: 'COMMENT_ADDED', message: `New ${internal ? 'internal note' : 'comment'} on ticket ${ticket.publicId}`, link })))
+    await logAudit({ req, action: 'TICKET_COMMENT_ADDED', entityType: 'TICKET', entity: ticket, after: { commentId: String(comment._id), isInternal: internal } })
+
     //send res
-    res.status(201).json({ message: 'comment added', payload: ticket.comments[ticket.comments.length - 1] })
+    res.status(201).json({ message: 'comment added', payload: comment })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// CSAT: only the requester, only while the ticket is CLOSED with
+// closeReason CONFIRMED, once per closure. After a reopen and a new closure the
+// requester can rate again and the new rating overwrites the old one.
+ticketApp.post('/tickets/:ticketId/csat', verifyToken(...ALL_ROLES), async (req, res, next) => {
+  try {
+    const { rating, comment } = req.body ?? {}
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      //send res
+      return res.status(400).json({ message: 'rating must be a whole number from 1 to 5' })
+    }
+    if (comment !== undefined && comment !== null && (typeof comment !== 'string' || comment.length > 500)) {
+      //send res
+      return res.status(400).json({ message: 'comment must be text of 500 characters or fewer' })
+    }
+    const ticket = await TicketModel.findOne({ ...idOrPublicIdFilter(req.params.ticketId), isDeleted: false })
+    if (!ticket || ticket.requester.toString() !== req.user.id) {
+      // another user's ticket looks exactly like a missing one
+      //send res
+      return res.status(404).json({ message: 'ticket not found' })
+    }
+    if (ticket.status !== 'CLOSED' || ticket.closeReason !== 'CONFIRMED' || !ticket.closedAt) {
+      //send res
+      return res.status(400).json({ message: 'you can rate a ticket once it is closed' })
+    }
+    if (ticket.csat?.submittedAt && ticket.csat.submittedAt >= ticket.closedAt) {
+      //send res
+      return res.status(409).json({ message: 'you already rated this ticket' })
+    }
+
+    const csat = { rating, submittedAt: new Date() }
+    if (typeof comment === 'string' && comment.trim()) csat.comment = comment.trim()
+    // the filter pins the closure we just read, so a reopen or a second
+    // rating arriving at the same moment cannot be overwritten silently
+    const written = await TicketModel.findOneAndUpdate(
+      {
+        _id: ticket._id, isDeleted: false, status: 'CLOSED', closeReason: 'CONFIRMED', closedAt: ticket.closedAt,
+        $or: [{ 'csat.submittedAt': { $exists: false } }, { 'csat.submittedAt': { $lt: ticket.closedAt } }],
+      },
+      { $set: { csat } },
+      { returnDocument: 'after', runValidators: true },
+    )
+    if (!written) {
+      //send res
+      return res.status(409).json({ message: 'ticket changed, please refresh' })
+    }
+    await logAudit({ req, action: 'TICKET_CSAT', entityType: 'TICKET', entity: written, after: { rating } })
+    //send res
+    res.status(201).json({ message: 'thank you for your feedback', payload: toTicketView(written, req.user) })
   } catch (err) {
     next(err)
   }

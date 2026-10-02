@@ -1,0 +1,21 @@
+@baseUrl = http://localhost:5000
+
+### admin only (login as admin@sdp.test)
+
+### audit trail (append-only). Filters: entityType (TICKET, ASSET, KB_ARTICLE, USER),
+### entityRef (e.g. TKT-2026-00001), action (e.g. TICKET_CLAIM, LOGIN), actor (user id)
+GET {{baseUrl}}/admin-api/audit-logs?limit=20
+
+###
+GET {{baseUrl}}/admin-api/audit-logs?entityRef=PASTE_TICKET_PUBLIC_ID
+
+###
+GET {{baseUrl}}/admin-api/audit-logs?entityType=USER&action=LOGIN
+
+### a malformed actor id -> 400
+GET {{baseUrl}}/admin-api/audit-logs?actor=nope
+
+### anyone who is not an admin -> 403 (login as employee@sdp.test and repeat the first request)
+
+### notifications: a malformed id -> 400
+PUT {{baseUrl}}/notification-api/mark-read/not-an-id

@@ -14,6 +14,7 @@ import { assetApp } from './APIs/AssetAPI.js'
 import { vendorApp } from './APIs/VendorAPI.js'
 import { kbApp } from './APIs/KnowledgeBaseAPI.js'
 import { aiApp } from './APIs/AiAPI.js'
+import { workLogApp } from './APIs/WorkLogAPI.js'
 import { sanitizeBody } from './middlewares/sanitize.js'
 import { cronStatus } from './jobs/status.js'
 
@@ -58,6 +59,7 @@ app.use('/asset-api', assetApp)
 app.use('/vendor-api', vendorApp)
 app.use('/kb-api', kbApp)
 app.use('/ai-api', aiApp)
+app.use('/worklog-api', workLogApp)
 
 // invalid path handler
 app.use((req, res) => {

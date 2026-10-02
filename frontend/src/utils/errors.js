@@ -7,6 +7,7 @@ export const getErrorMessage = (err, fallback = 'Something went wrong') => {
   const data = err?.response?.data
   if (typeof data?.error === 'string' && data.error) return data.error
   if (typeof data?.message === 'string' && data.message) return data.message
+  if (err?.code === 'ECONNABORTED') return 'The server took too long to respond — it may be waking up, please try again in a moment'
   if (err?.request && !err?.response) return 'Cannot reach the server — check your connection'
   return fallback
 }

@@ -21,6 +21,7 @@ import { applyUpdate } from '../testkit/applyUpdate.js'
 import { KnowledgeArticleModel } from '../models/KnowledgeArticleModel.js'
 import { CategoryModel } from '../models/CategoryModel.js'
 import { UserModel } from '../models/UserModel.js'
+import { AuditLogModel } from '../models/AuditLogModel.js'
 import { isKbTransitionAllowed, KB_TRANSITIONS } from '../utils/kbTransitions.js'
 import { buildKbQuery } from '../utils/buildKbQuery.js'
 import { kbApp } from '../APIs/KnowledgeBaseAPI.js'
@@ -251,6 +252,9 @@ describe('KB routes over HTTP (stubbed models)', () => {
       await d.validate() // real schema validation
       store.push(snap(d)); return d
     }
+
+    // no database in this file: audit writes are accepted and dropped (the real path is covered by the real-DB tests)
+    AuditLogModel.create = async () => ({})
 
     const app = exp()
     app.use(exp.json()); app.use(cookieParser()); app.use(sanitizeBody)

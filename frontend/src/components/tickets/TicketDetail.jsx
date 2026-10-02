@@ -6,11 +6,16 @@ import { useAuthStore } from '../../store/authStore.js'
 import { styles, statusColors, priorityColors } from '../../styles/common.js'
 import { getSlaStatus, formatSlaCountdown } from '../../utils/sla.js'
 import { getErrorMessage } from '../../utils/errors.js'
+import { CsatPanel } from './CsatPanel.jsx'
+import { WorkLogPanel } from './WorkLogPanel.jsx'
+import { AuditPanel } from './AuditPanel.jsx'
 
 // actions that need a required text reason/note alongside them
 const NOTE_REQUIRED_ACTIONS = ['reject', 'cancel', 'hold', 'reopen']
 // actions that need a technician picked from the team
 const ASSIGN_ACTIONS = ['assign', 'reassign']
+// nothing can be added to a ticket in one of these statuses (mirrors the API)
+const FINISHED_STATUSES = ['CLOSED', 'CANCELLED', 'REJECTED']
 
 // which actions this role/status combo could plausibly try — the backend
 // (utils/ticketTransitions.js) is still the source of truth and will
@@ -129,7 +134,7 @@ export const TicketDetail = () => {
     e.preventDefault()
     if (!commentText.trim()) return
     try {
-      await axiosInstance.post(`/ticket-api/tickets/${ticketId}/comments`, { text: commentText, isInternal })
+      await axiosInstance.post(`/ticket-api/tickets/${ticketId}/comments`, { text: commentText, isInternal: internalOnly || isInternal })
       setCommentText('')
       load()
     } catch (err) {
@@ -143,6 +148,12 @@ export const TicketDetail = () => {
   const actions = actionsFor(ticket, user)
   const simpleActions = actions.filter((a) => a !== 'resolve' && !NOTE_REQUIRED_ACTIONS.includes(a) && !ASSIGN_ACTIONS.includes(a))
   const sla = getSlaStatus(ticket)
+  const isRequester = Boolean(ticket.requester) && user._id === ticket.requester._id
+  const isAssignee = Boolean(ticket.assignedTo) && user._id === ticket.assignedTo._id
+  const isFinished = FINISHED_STATUSES.includes(ticket.status)
+  // public replies: requester, assigned technician, manager, admin. Another technician of the team can only leave internal notes
+  const canReplyPublic = isRequester || isAssignee || user.role === 'MANAGER' || user.role === 'ADMIN'
+  const internalOnly = isStaff && !canReplyPublic
   const canChangePriority = (user.role === 'MANAGER' || user.role === 'ADMIN') && !['RESOLVED', 'CLOSED', 'CANCELLED', 'REJECTED'].includes(ticket.status)
 
   return (
@@ -186,6 +197,7 @@ export const TicketDetail = () => {
           <p className="text-sm text-slate-500 mb-2">Cancelled: {ticket.cancellation.reason}</p>
         )}
         {ticket.status === 'ON_HOLD' && <p className="text-sm text-amber-600 mb-2">On hold — SLA clock paused</p>}
+        {ticket.status === 'CLOSED' && ticket.closedAt && <p className="text-xs text-slate-400 mb-2">Closed {new Date(ticket.closedAt).toLocaleString()}{ticket.closeReason ? ` (${ticket.closeReason.toLowerCase().replace('_', ' ')})` : ''}</p>}
         {ticket.reopenCount > 0 && <p className="text-xs text-orange-500 mb-4">Reopened {ticket.reopenCount} time{ticket.reopenCount > 1 ? 's' : ''}</p>}
 
         {actions.length > 0 && (
@@ -230,6 +242,10 @@ export const TicketDetail = () => {
           </div>
         )}
 
+        <CsatPanel ticket={ticket} isRequester={isRequester} onSaved={load} />
+        {isStaff && <WorkLogPanel ticket={ticket} canAdd={user.role === 'TECHNICIAN' && isAssignee && !isFinished} />}
+        {user.role === 'ADMIN' && <AuditPanel ticket={ticket} />}
+
         {isStaff && kbSuggestions?.articles?.length > 0 && (
           <div className="mb-6 border-t border-slate-100 pt-4">
             <h2 className={styles.h2}>Suggested knowledge base articles</h2>
@@ -259,18 +275,22 @@ export const TicketDetail = () => {
           {(!ticket.comments || ticket.comments.length === 0) && <p className="text-slate-400 text-sm">No comments yet.</p>}
         </ul>
 
-        <form onSubmit={addComment} className="space-y-2">
-          <textarea className={styles.textarea} placeholder="Add a comment…" value={commentText} onChange={(e) => setCommentText(e.target.value)} />
-          <div className="flex items-center justify-between">
-            {isStaff && (
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input type="checkbox" checked={isInternal} onChange={(e) => setIsInternal(e.target.checked)} />
-                Internal note (hidden from requester)
-              </label>
-            )}
-            <button className={styles.btnPrimary} type="submit">Post comment</button>
-          </div>
-        </form>
+        {isFinished ? (
+          <p className="text-sm text-slate-400">This ticket is {ticket.status.toLowerCase()}, so no more comments can be added.</p>
+        ) : (
+          <form onSubmit={addComment} className="space-y-2">
+            <textarea className={styles.textarea} maxLength={2000} placeholder={internalOnly ? 'Add an internal note…' : 'Add a comment…'} value={commentText} onChange={(e) => setCommentText(e.target.value)} />
+            <div className="flex items-center justify-between">
+              {isStaff && (
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input type="checkbox" checked={internalOnly || isInternal} disabled={internalOnly} onChange={(e) => setIsInternal(e.target.checked)} />
+                  {internalOnly ? 'Internal note (only the assigned technician or a manager can reply publicly)' : 'Internal note (hidden from requester)'}
+                </label>
+              )}
+              <button className={styles.btnPrimary} type="submit">Post comment</button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   )

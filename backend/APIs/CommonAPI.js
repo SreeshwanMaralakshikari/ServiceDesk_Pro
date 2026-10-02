@@ -3,7 +3,8 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { UserModel } from '../models/UserModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
-import { loginLimiter, registerLimiter } from '../middlewares/rateLimiters.js'
+import { loginLimiter, loginEmailLimiter, registerLimiter } from '../middlewares/rateLimiters.js'
+import { logAudit } from '../utils/logAudit.js'
 import { validateRoleDepartment } from '../utils/validateRoleDepartment.js'
 
 export const commonApp = exp.Router()
@@ -14,6 +15,9 @@ const cookieOptions = () => ({
   sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'lax',
   maxAge: 24 * 60 * 60 * 1000, // 1 day, matches JWT_EXPIRES_IN default
 })
+
+// applies to a NEW password only; existing accounts keep theirs until they change it
+const MIN_NEW_PASSWORD_LENGTH = 12
 
 // self-register: always EMPLOYEE, role/department never trusted from elsewhere
 commonApp.post('/users', registerLimiter, async (req, res, next) => {
@@ -42,7 +46,7 @@ commonApp.post('/users', registerLimiter, async (req, res, next) => {
   }
 })
 
-commonApp.post('/login', loginLimiter, async (req, res, next) => {
+commonApp.post('/login', loginLimiter, loginEmailLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body ?? {}
     if (!email || !password) {
@@ -76,6 +80,7 @@ commonApp.post('/login', loginLimiter, async (req, res, next) => {
 
     const safeUser = user.toObject()
     delete safeUser.password
+    await logAudit({ req, actor: user._id, action: 'LOGIN', entityType: 'USER', entity: user })
     //send res
     res.status(200).json({ message: 'login successful', payload: safeUser })
   } catch (err) {
@@ -106,6 +111,10 @@ commonApp.put('/password', verifyToken('ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOY
       //send res
       return res.status(400).json({ message: 'currentPassword and newPassword are required' })
     }
+    if (newPassword.length < MIN_NEW_PASSWORD_LENGTH || newPassword.length > 72) {
+      //send res
+      return res.status(400).json({ message: `new password must be ${MIN_NEW_PASSWORD_LENGTH}-72 characters` })
+    }
     const user = await UserModel.findById(req.user.id).select('+password')
     const match = await bcrypt.compare(currentPassword, user.password)
     if (!match) {
@@ -114,6 +123,7 @@ commonApp.put('/password', verifyToken('ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOY
     }
     user.password = await bcrypt.hash(newPassword, 10)
     await user.save()
+    await logAudit({ req, action: 'PASSWORD_CHANGED', entityType: 'USER', entity: user })
     res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' })
     //send res
     res.status(200).json({ message: 'password changed, please login again' })

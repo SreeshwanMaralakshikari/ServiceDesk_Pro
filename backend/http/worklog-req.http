@@ -1,0 +1,27 @@
+@baseUrl = http://localhost:5000
+
+### work logs (/worklog-api)
+### add: ONLY the technician the ticket is assigned to (login as tech@sdp.test)
+POST {{baseUrl}}/worklog-api/PASTE_TICKET_PUBLIC_ID
+Content-Type: application/json
+
+{
+  "description": "Swapped the charger and tested the battery.",
+  "minutesSpent": 25
+}
+
+### read: technician or manager of the ticket's team, or admin (response has totalMinutes)
+GET {{baseUrl}}/worklog-api/PASTE_TICKET_PUBLIC_ID
+
+### --- negative cases ---
+
+### minutesSpent must be a whole number from 1 to 1440 -> 400
+POST {{baseUrl}}/worklog-api/PASTE_TICKET_PUBLIC_ID
+Content-Type: application/json
+
+{ "description": "bad minutes", "minutesSpent": 0 }
+
+### a technician who is not assigned -> 404
+### a manager or employee trying to add -> 403
+### logging on a CLOSED / CANCELLED / REJECTED ticket -> 400
+### the requester (employee) reading work logs -> 403

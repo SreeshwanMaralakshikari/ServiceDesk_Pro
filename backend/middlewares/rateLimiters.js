@@ -13,6 +13,25 @@ export const loginLimiter = rateLimit({
   message: tooMany('login attempts'),
 })
 
+// second login limiter, keyed on the ACCOUNT (email), not the address. The
+// per-IP limiter alone can be dodged by sending a fake X-Forwarded-For
+// straight to the API host (F-045); this one cannot. The limit is higher than
+// the per-IP one so that someone typing a wrong password on a shared account
+// cannot easily lock the real owner out.
+const emailKey = (req) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
+  return email ? `email:${email}` : `no-email:${req.ip}`
+}
+export const loginEmailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number.parseInt(process.env.LOGIN_EMAIL_LIMIT_MAX, 10) || 20,
+  skipSuccessfulRequests: true,
+  keyGenerator: emailKey,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: tooMany('login attempts for this account'),
+})
+
 // public self-registration is unauthenticated, so it is limited per IP
 export const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,

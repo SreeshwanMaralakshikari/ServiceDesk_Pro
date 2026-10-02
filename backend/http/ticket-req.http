@@ -243,3 +243,32 @@ GET {{baseUrl}}/ticket-api/tickets
 
 ### employee: list/detail/PATCH responses never contain internal comments
 GET {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID
+
+### --- TICKET-COMPLETION ---
+
+### CSAT: only the requester, only when the ticket is CLOSED and was confirmed (login as employee)
+POST {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/csat
+Content-Type: application/json
+
+{ "rating": 4, "comment": "Fixed quickly, thanks." }
+
+### rating must be a whole number 1-5 -> 400
+POST {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/csat
+Content-Type: application/json
+
+{ "rating": 6 }
+
+### a second rating for the same closure -> 409; after reopen + close again a new rating overwrites
+### someone else's ticket -> 404; ticket not closed yet -> 400
+
+### comment rules:
+###  - public reply: requester, assigned technician, team manager, admin
+###  - another technician of the team: internal notes only ("isInternal": true), public -> 403
+###  - CLOSED / CANCELLED / REJECTED ticket -> 400
+POST {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/comments
+Content-Type: application/json
+
+{ "text": "Please try the new charger.", "isInternal": false }
+
+### after confirm the ticket has closeReason CONFIRMED and closedAt; reopen clears both
+GET {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID

@@ -2,6 +2,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../store/authStore.js'
 import { styles } from '../styles/common.js'
+import { NotificationBell } from './notifications/NotificationBell.jsx'
 
 export const Header = () => {
   const { user, isAuthenticated, logout } = useAuthStore()
@@ -27,7 +28,8 @@ export const Header = () => {
               {(user?.role === 'ASSET_MANAGER' || user?.role === 'ADMIN' || user?.role === 'TECHNICIAN') && <Link to="/assets" className={styles.navLink}>Assets</Link>}
               {(user?.role === 'ASSET_MANAGER' || user?.role === 'ADMIN') && <Link to="/vendors" className={styles.navLink}>Vendors</Link>}
               {user?.role === 'ADMIN' && <Link to="/admin" className={styles.navLink}>Admin</Link>}
-              <span className="text-sm text-slate-400">{user?.firstName} · {user?.role}</span>
+              <NotificationBell />
+              <Link to="/account/password" className="text-sm text-slate-400 hover:text-indigo-600" title="Change password">{user?.firstName} · {user?.role}</Link>
               <button onClick={handleLogout} className={styles.btnSecondary}>Logout</button>
             </>
           ) : (

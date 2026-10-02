@@ -10,6 +10,7 @@ import { atomicTransition, isValidVersion, VERSION_REQUIRED_MESSAGE } from '../u
 import { getPagination, toPage } from '../utils/pagination.js'
 import { asText } from '../utils/queryParams.js'
 import { createNotification } from '../utils/createNotification.js'
+import { logAudit } from '../utils/logAudit.js'
 
 export const assetApp = exp.Router()
 
@@ -92,6 +93,7 @@ assetApp.post('/assets', verifyToken(...MANAGE_ROLES), async (req, res, next) =>
       status: 'PROCURED',
       lifecycleHistory: [{ toStatus: 'PROCURED', by: req.user.id, note: 'asset procured' }],
     })
+    await logAudit({ req, action: 'ASSET_CREATED', entityType: 'ASSET', entity: asset, after: { name, status: 'PROCURED' } })
     //send res
     res.status(201).json({ message: 'asset created', payload: asset })
   } catch (err) { next(err) }
@@ -269,7 +271,8 @@ assetApp.patch('/assets/:assetId/replace', verifyToken(...MANAGE_ROLES), async (
       return res.status(second.error.status).json({ message: second.error.message })
     }
 
-    await createNotification({ user: assignee, type: 'GENERAL', message: `Your asset ${oldAsset.publicId} was replaced with ${newAsset.publicId}`, link: '/my-assets' })
+    await logAudit({ req, action: 'ASSET_REPLACE', entityType: 'ASSET', entity: oldAsset, before: { status: oldFromStatus }, after: { replacedBy: newAsset.publicId } })
+    await createNotification({ user: assignee, type: 'ASSET_ASSIGNED', message: `Your asset ${oldAsset.publicId} was replaced with ${newAsset.publicId}`, link: '/my-assets' })
     //send res
     res.status(200).json({ message: 'asset replaced', payload: { oldAsset: first.doc, newAsset: second.doc } })
   } catch (err) { next(err) }
@@ -337,8 +340,13 @@ assetApp.patch('/assets/:assetId/:action', verifyToken(...READ_ROLES), async (re
       return res.status(result.error.status).json({ message: result.error.message })
     }
 
+    await logAudit({
+      req, action: `ASSET_${action.toUpperCase()}`, entityType: 'ASSET', entity: result.doc,
+      before: { status: asset.status, assignedTo: asset.assignedTo ? String(asset.assignedTo) : null, version },
+      after: { status: result.doc.status, assignedTo: result.doc.assignedTo ? String(result.doc.assignedTo) : null, version: result.doc.version },
+    })
     if (action === 'assign') {
-      await createNotification({ user: assignedTo, type: 'GENERAL', message: `Asset ${asset.publicId} (${asset.name}) was assigned to you`, link: '/my-assets' })
+      await createNotification({ user: assignedTo, type: 'ASSET_ASSIGNED', message: `Asset ${asset.publicId} (${asset.name}) was assigned to you`, link: '/my-assets' })
     }
 
     //send res

@@ -8,6 +8,7 @@ import { buildKbQuery } from '../utils/buildKbQuery.js'
 import { KB_TRANSITIONS, isKbTransitionAllowed } from '../utils/kbTransitions.js'
 import { atomicTransition, isValidVersion, VERSION_REQUIRED_MESSAGE } from '../utils/atomicTransition.js'
 import { getPagination, toPage } from '../utils/pagination.js'
+import { logAudit } from '../utils/logAudit.js'
 
 export const kbApp = exp.Router()
 
@@ -119,6 +120,7 @@ kbApp.post('/articles', verifyToken(...WRITE_ROLES), async (req, res, next) => {
         if (code !== 11000 || dupField !== 'publicId' || attempt >= 3) throw err
       }
     }
+    await logAudit({ req, action: 'KB_CREATED', entityType: 'KB_ARTICLE', entity: article, after: { status: article.status } })
     //send res
     res.status(201).json({ message: 'article created', payload: article })
   } catch (err) { next(err) }
@@ -273,6 +275,7 @@ kbApp.patch('/articles/:articleId/:action', verifyToken(...WRITE_ROLES), async (
       //send res
       return res.status(result.error.status).json({ message: result.error.message })
     }
+    await logAudit({ req, action: `KB_${action.toUpperCase()}`, entityType: 'KB_ARTICLE', entity: result.doc, before: { status: article.status, version }, after: { status: result.doc.status, version: result.doc.version } })
     //send res
     res.status(200).json({ message: `article ${action}ed`, payload: result.doc })
   } catch (err) { next(err) }

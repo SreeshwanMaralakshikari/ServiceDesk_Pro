@@ -10,6 +10,8 @@ import { TicketList } from './components/tickets/TicketList.jsx'
 import { CreateTicket } from './components/tickets/CreateTicket.jsx'
 import { TicketDetail } from './components/tickets/TicketDetail.jsx'
 import { ApprovalsInbox } from './components/tickets/ApprovalsInbox.jsx'
+import { NotificationsPage } from './components/notifications/NotificationsPage.jsx'
+import { ChangePassword } from './components/account/ChangePassword.jsx'
 import { AdminDashboard } from './components/admin/AdminDashboard.jsx'
 import { MyAssets } from './components/assets/MyAssets.jsx'
 import { AssetList } from './components/assets/AssetList.jsx'
@@ -36,6 +38,8 @@ export const router = createBrowserRouter([
           { path: 'tickets', element: <TicketList /> },
           { path: 'tickets/new', element: <CreateTicket /> },
           { path: 'tickets/:ticketId', element: <TicketDetail /> },
+          { path: 'notifications', element: <NotificationsPage /> },
+          { path: 'account/password', element: <ChangePassword /> },
           { path: 'my-assets', element: <MyAssets /> },
           { path: 'kb', element: <KnowledgeBase /> },
           { path: 'kb/:articleId', element: <ArticleDetail /> },
