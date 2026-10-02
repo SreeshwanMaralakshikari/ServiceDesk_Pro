@@ -9,7 +9,8 @@ import { UserModel } from '../models/UserModel.js'
 const email = (process.env.RESET_EMAIL || '').trim().toLowerCase()
 const password = process.env.RESET_PASSWORD || ''
 
-if (!email || password.length < 12) {
+if (!email || password.length < 12)
+{
   console.log('set RESET_EMAIL and RESET_PASSWORD (at least 12 characters) first')
   process.exit(1)
 }
@@ -21,7 +22,7 @@ if (!user) {
   await mongoose.connection.close()
   process.exit(1)
 }
-user.password = await bcrypt.hash(password, 10)
+user.password = await bcrypt.hash(password,10)
 await user.save()
 console.log(`password reset for ${email} (${user.role})`)
 await mongoose.connection.close()
