@@ -30,6 +30,13 @@ const knowledgeArticleSchema = new Schema({
 
   author: { type: Types.ObjectId, ref: 'user', required: true },
 
+  // a technician's draft waiting for a manager; cleared when the article is published, archived or restored
+  reviewRequestedAt: { type: Date },
+
+  // "was this helpful": one vote per person, kept as a list so a vote can be taken back and never counted twice
+  helpfulBy:    [{ type: Types.ObjectId, ref: 'user' }],
+  helpfulCount: { type: Number, default: 0 },
+
   viewCount:   { type: Number, default: 0 }, // published views only, bumped atomically in the route
   publishedAt: { type: Date },
   archivedAt:  { type: Date },
@@ -46,6 +53,7 @@ const knowledgeArticleSchema = new Schema({
 
 knowledgeArticleSchema.index({ status: 1, category: 1 })
 knowledgeArticleSchema.index({ author: 1 })
+knowledgeArticleSchema.index({ status: 1, reviewRequestedAt: 1 }) // the manager's pending-review list
 knowledgeArticleSchema.index({ title: 'text', summary: 'text', content: 'text', tags: 'text' })
 
 export const KnowledgeArticleModel = model('knowledgearticle', knowledgeArticleSchema)

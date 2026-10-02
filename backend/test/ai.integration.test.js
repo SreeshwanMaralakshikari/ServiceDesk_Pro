@@ -104,7 +104,7 @@ describe('real server.js + /ai-api (only DB/cron/groq stubbed)', () => {
 
     for (const [k, obj, names] of [
       ['cat', Category, ['find']], ['sla', SLAPolicy, ['find']], ['ticket', Ticket, ['findOne']],
-      ['kb', KB, ['find']], ['user', User, ['findById']], ['log', AiLog, ['create']], ['groq', groq, ['isConfigured', 'chatCompletion']],
+      ['kb', KB, ['find']], ['user', User, ['findById']], ['log', AiLog, ['create', 'findOne']], ['groq', groq, ['isConfigured', 'chatCompletion']],
     ]) { saved[k] = {}; for (const n of names) saved[k][n] = obj[n] }
 
     User.findById = (id) => chain(Object.values(USERS).find((u) => u._id === String(id)) && { ...Object.values(USERS).find((u) => u._id === String(id)), isActive: true })
@@ -112,6 +112,7 @@ describe('real server.js + /ai-api (only DB/cron/groq stubbed)', () => {
     SLAPolicy.find = (f) => { castCheck(saved.sla.find, SLAPolicy, f); return chain(priorities.filter(sift(f))) }
     Ticket.findOne = (f) => { castCheck(saved.ticket.findOne, Ticket, f); return chain(ticketStore.find(sift(f)) || null) }
     KB.find = (f) => { castCheck(saved.kb.find, KB, f); return chain(kbStore.filter((d) => matchesFilter(d, f))) }
+    AiLog.findOne = () => chain(null) // no earlier classification to reuse
     AiLog.create = async (data) => { await new AiLog(data).validate(); const d = { _id: oid(9000 + aiLogs.length), ...data }; aiLogs.push(d); return d }
   })
   after(() => {

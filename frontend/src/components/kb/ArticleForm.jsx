@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
+import { useAuthStore } from '../../store/authStore.js'
 import { styles } from '../../styles/common.js'
 import { getErrorMessage } from '../../utils/errors.js'
 
@@ -13,6 +14,7 @@ export const ArticleForm = () => {
   const { articleId } = useParams()
   const isEdit = Boolean(articleId)
   const navigate = useNavigate()
+  const role = useAuthStore((st) => st.user?.role)
   const [categories, setCategories] = useState([])
   const [form, setForm] = useState({ title: '', summary: '', content: '', categoryId: '', tags: '' })
   const [loading, setLoading] = useState(false)
@@ -88,7 +90,7 @@ export const ArticleForm = () => {
           <button className={styles.btnPrimary} disabled={loading} type="submit">
             {loading ? 'Saving…' : isEdit ? 'Save changes' : 'Create draft'}
           </button>
-          {!isEdit && <p className="text-xs text-slate-500">New articles start as drafts — publish from the article page when ready.</p>}
+          {!isEdit && <p className="text-xs text-slate-500">New articles start as drafts. {role === 'TECHNICIAN' ? 'When it is ready, ask for a review from the article page; a manager publishes it.' : 'Publish from the article page when ready.'}</p>}
         </form>
       </div>
     </div>

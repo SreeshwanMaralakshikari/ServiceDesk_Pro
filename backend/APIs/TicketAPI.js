@@ -25,7 +25,8 @@ import { autoAssignTicket } from '../utils/autoAssign.js'
 import { rankTechnicians, matchedSkills } from '../utils/dsa/techHeap.js'
 import { findSimilar } from '../utils/dsa/similarity.js'
 import { mergeSorted, sortByTime } from '../utils/dsa/timeline.js'
-import { Types } from 'mongoose'
+import { Types, isValidObjectId } from 'mongoose'
+import { AiLogModel } from '../models/AiLogModel.js'
 
 export const ticketApp = exp.Router()
 
@@ -63,7 +64,7 @@ ticketApp.get('/team-technicians', verifyToken('MANAGER', 'ADMIN'), async (req, 
 ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, next) => {
   try {
     // destructure known fields only — never new Model(req.body)
-    const { title, description, categoryId, priority } = req.body ?? {}
+    const { title, description, categoryId, priority, aiLogId } = req.body ?? {}
     if (!title || !description || !categoryId) {
       //send res
       return res.status(400).json({ message: 'title, description and categoryId are required' })
@@ -106,6 +107,26 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
       status = 'PENDING_APPROVAL'
     }
 
+    // if the form used the AI suggestion, note what it said and whether the person kept it.
+    // Only the id comes from the client: the log must be this person's own classify call and
+    // `acceptedByUser` is worked out here by comparing what was suggested with what was submitted
+    let ai
+    if (typeof aiLogId === 'string' && isValidObjectId(aiLogId)) {
+      const log = await AiLogModel.findOne({ _id: aiLogId, kind: 'CLASSIFY_TICKET', requestedBy: req.user.id })
+      if (log?.output) {
+        const suggestedCategory = log.output.categoryId ?? undefined
+        const suggestedPriority = log.output.priority ?? undefined
+        ai = {
+          source: log.output.source === 'ai' ? 'ai' : 'fallback',
+          aiLogId: log._id,
+          suggestedCategory,
+          suggestedPriority,
+          probableIssue: log.output.probableIssue ?? undefined,
+          acceptedByUser: Boolean(suggestedCategory) && String(suggestedCategory) === String(category._id) && suggestedPriority === policy.priority,
+        }
+      }
+    }
+
     const ticket = await TicketModel.create({
       publicId,
       title,
@@ -118,6 +139,7 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
       priority: policy.priority,
       status,
       sla,
+      ...(ai ? { ai } : {}),
       statusHistory: [{ to: status, by: requester._id, note: needsApproval ? 'ticket created — awaiting approval' : 'ticket created' }],
     })
 

@@ -4,11 +4,14 @@ import { CategoryModel } from '../models/CategoryModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
 import { generateSequentialId } from '../utils/generateSequentialId.js'
 import { idOrPublicIdFilter } from '../utils/findByIdOrPublicId.js'
-import { buildKbQuery } from '../utils/buildKbQuery.js'
+import { buildKbQuery, TEXT_SCORE, textRankSort } from '../utils/buildKbQuery.js'
 import { KB_TRANSITIONS, isKbTransitionAllowed } from '../utils/kbTransitions.js'
 import { atomicTransition, isValidVersion, VERSION_REQUIRED_MESSAGE } from '../utils/atomicTransition.js'
 import { getPagination, toPage } from '../utils/pagination.js'
 import { logAudit } from '../utils/logAudit.js'
+import { UserModel } from '../models/UserModel.js'
+import { notifyMany } from '../utils/createNotification.js'
+import { asText } from '../utils/queryParams.js'
 
 export const kbApp = exp.Router()
 
@@ -35,6 +38,16 @@ const normalizeTags = (tags) => {
 }
 const isText = (v) => typeof v === 'string'
 
+// who voted is private: the response says how many found it helpful and whether the caller did
+export const toArticleView = (article, user) => {
+  const view = typeof article.toObject === 'function' ? article.toObject() : { ...article }
+  const voters = (view.helpfulBy ?? []).map(String)
+  view.markedHelpful = voters.includes(String(user.id))
+  view.helpfulCount = view.helpfulCount ?? 0
+  delete view.helpfulBy
+  return view
+}
+
 const canViewNonPublished = (article, user) =>
   isAuthor(article, user) || ELEVATED_ROLES.includes(user.role)
 
@@ -43,16 +56,25 @@ const canViewNonPublished = (article, user) =>
 // browsing and the eventual AI kb-suggestions lookup share one code path.
 kbApp.get('/articles', verifyToken(...ALL_ROLES), async (req, res, next) => {
   try {
-    const { status, category, q } = req.query
-    const query = buildKbQuery(req.user, { status, category, q })
+    const { status, category, q, review } = req.query
+    // the review inbox is for the people who can act on it
+    if (asText(review) === 'pending' && !ELEVATED_ROLES.includes(req.user.role)) {
+      //send res
+      return res.status(403).json({ message: 'only a manager or admin can list articles waiting for review' })
+    }
+    const query = buildKbQuery(req.user, { status, category, q, review })
 
     const paging = getPagination(req.query)
+    // a text search is ranked by how well it matches; browsing shows the newest first
+    const searching = Boolean(asText(q))
+    const find = KnowledgeArticleModel.find(query)
+      .select('-content -history -helpfulBy') // list view: no need to ship the full body, the audit trail or who voted
+      .populate('category', 'name department')
+      .populate('author', 'firstName lastName role')
+    if (searching) find.select(TEXT_SCORE)
     const [items, total] = await Promise.all([
-      KnowledgeArticleModel.find(query)
-        .select('-content -history') // list view: no need to ship the full body/audit trail
-        .populate('category', 'name department')
-        .populate('author', 'firstName lastName role')
-        .sort({ publishedAt: -1, createdAt: -1, _id: -1 }) // _id last so equal timestamps still page deterministically
+      find
+        .sort(searching ? textRankSort : { publishedAt: -1, createdAt: -1, _id: -1 }) // _id last so equal timestamps still page deterministically
         .skip(paging.skip)
         .limit(paging.limit),
       KnowledgeArticleModel.countDocuments(query),
@@ -69,7 +91,7 @@ kbApp.get('/articles', verifyToken(...ALL_ROLES), async (req, res, next) => {
 kbApp.get('/articles/mine', verifyToken(...WRITE_ROLES), async (req, res, next) => {
   try {
     const articles = await KnowledgeArticleModel.find({ author: req.user.id, isDeleted: false })
-      .select('-content -history')
+      .select('-content -history -helpfulBy')
       .populate('category', 'name department')
       .sort({ updatedAt: -1 })
     //send res
@@ -122,7 +144,7 @@ kbApp.post('/articles', verifyToken(...WRITE_ROLES), async (req, res, next) => {
     }
     await logAudit({ req, action: 'KB_CREATED', entityType: 'KB_ARTICLE', entity: article, after: { status: article.status } })
     //send res
-    res.status(201).json({ message: 'article created', payload: article })
+    res.status(201).json({ message: 'article created', payload: toArticleView(article, req.user) })
   } catch (err) { next(err) }
 })
 
@@ -145,7 +167,7 @@ kbApp.get('/articles/:articleId', verifyToken(...ALL_ROLES), async (req, res, ne
       article.viewCount += 1
     }
     //send res
-    res.status(200).json({ message: 'article fetched', payload: article })
+    res.status(200).json({ message: 'article fetched', payload: toArticleView(article, req.user) })
   } catch (err) { next(err) }
 })
 
@@ -174,6 +196,11 @@ kbApp.patch('/articles/:articleId', verifyToken(...WRITE_ROLES), async (req, res
       //send res
       return res.status(403).json({ message: 'only the author (or a manager/admin) can edit this article' })
     }
+    // a published article is reviewed content: a technician changes it by asking a manager
+    if (req.user.role === 'TECHNICIAN' && article.status !== 'DRAFT') {
+      //send res
+      return res.status(400).json({ message: 'technicians can only edit drafts; ask a manager to change a published article' })
+    }
     if (article.status === 'ARCHIVED') {
       //send res
       return res.status(400).json({ message: 'restore this article to draft before editing it' })
@@ -192,7 +219,7 @@ kbApp.patch('/articles/:articleId', verifyToken(...WRITE_ROLES), async (req, res
     if (cleanTags !== undefined) article.tags = cleanTags
     await article.save()
     //send res
-    res.status(200).json({ message: 'article updated', payload: article })
+    res.status(200).json({ message: 'article updated', payload: toArticleView(article, req.user) })
   } catch (err) { next(err) }
 })
 
@@ -250,7 +277,7 @@ kbApp.patch('/articles/:articleId/:action', verifyToken(...WRITE_ROLES), async (
       //send res
       return res.status(check.reason.includes('authorized') ? 403 : 400).json({ message: check.reason })
     }
-    if (check.authorOrElevatedOnly && req.user.role === 'TECHNICIAN' && !isAuthor(article, req.user)) {
+    if (check.authorOnlyForTechnician && req.user.role === 'TECHNICIAN' && !isAuthor(article, req.user)) {
       //send res
       return res.status(403).json({ message: 'only the author (or a manager/admin) can do this' })
     }
@@ -260,24 +287,69 @@ kbApp.patch('/articles/:articleId/:action', verifyToken(...WRITE_ROLES), async (
     }
 
     const now = new Date()
-    const set = { status: check.to }
+    const set = {}
     const unset = {}
+    if (check.to) set.status = check.to
+    if (action === 'request-review') set.reviewRequestedAt = now
     if (action === 'publish') set.publishedAt = now
     if (action === 'archive') set.archivedAt = now
     if (action === 'restore') unset.archivedAt = ''
+    // any decision on the draft closes the review request
+    if (check.to) unset.reviewRequestedAt = ''
 
     const result = await atomicTransition({
       Model: KnowledgeArticleModel, doc: article, action, noun: 'article', from: KB_TRANSITIONS[action].from, version,
       set, unset,
-      push: { history: { fromStatus: article.status, toStatus: check.to, by: req.user.id, note, at: now } },
+      push: { history: { fromStatus: article.status, toStatus: check.to ?? article.status, by: req.user.id, note: note ?? (action === 'request-review' ? 'review requested' : undefined), at: now } },
     })
     if (result.error) {
       //send res
       return res.status(result.error.status).json({ message: result.error.message })
     }
     await logAudit({ req, action: `KB_${action.toUpperCase()}`, entityType: 'KB_ARTICLE', entity: result.doc, before: { status: article.status, version }, after: { status: result.doc.status, version: result.doc.version } })
+    if (action === 'request-review') {
+      // managers of the category's team hear about it; a team without a manager falls back to the admins
+      const category = await CategoryModel.findById(article.category).select('department')
+      let recipients = category ? await UserModel.find({ role: 'MANAGER', department: category.department, isActive: true }).select('_id') : []
+      if (recipients.length === 0) recipients = await UserModel.find({ role: 'ADMIN', isActive: true }).select('_id')
+      await notifyMany(recipients.map((u) => u._id), {
+        type: 'KB_REVIEW_REQUESTED',
+        message: `Article ${article.publicId} "${article.title}" is ready for review`,
+        link: `/kb/${article.publicId}`,
+      })
+    }
     //send res
-    res.status(200).json({ message: `article ${action}ed`, payload: result.doc })
+    res.status(200).json({ message: action === 'request-review' ? 'review requested' : `article ${action}ed`, payload: toArticleView(result.doc, req.user) })
+  } catch (err) { next(err) }
+})
+
+// helpful vote — anyone who can read a PUBLISHED article, once each, and it can be taken back.
+// One atomic update per direction: the filter only matches while the vote is (not) there, so
+// two quick clicks can never count twice. Authors cannot vote on their own article.
+kbApp.put('/articles/:articleId/helpful', verifyToken(...ALL_ROLES), async (req, res, next) => {
+  try {
+    const { helpful } = req.body ?? {}
+    if (typeof helpful !== 'boolean') {
+      //send res
+      return res.status(400).json({ message: 'helpful must be true or false' })
+    }
+    const article = await KnowledgeArticleModel.findOne({ ...idOrPublicIdFilter(req.params.articleId), isDeleted: false, status: 'PUBLISHED' }).select('author')
+    if (!article) {
+      //send res
+      return res.status(404).json({ message: 'article not found' })
+    }
+    if (isAuthor(article, req.user)) {
+      //send res
+      return res.status(400).json({ message: 'you cannot vote on your own article' })
+    }
+    if (helpful) {
+      await KnowledgeArticleModel.updateOne({ _id: article._id, helpfulBy: { $ne: req.user.id } }, { $addToSet: { helpfulBy: req.user.id }, $inc: { helpfulCount: 1 } })
+    } else {
+      await KnowledgeArticleModel.updateOne({ _id: article._id, helpfulBy: req.user.id }, { $pull: { helpfulBy: req.user.id }, $inc: { helpfulCount: -1 } })
+    }
+    const fresh = await KnowledgeArticleModel.findById(article._id).select('helpfulBy helpfulCount')
+    //send res
+    res.status(200).json({ message: 'vote saved', payload: { helpfulCount: fresh.helpfulCount, markedHelpful: fresh.helpfulBy.map(String).includes(String(req.user.id)) } })
   } catch (err) { next(err) }
 })
 

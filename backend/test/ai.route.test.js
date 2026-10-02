@@ -8,6 +8,7 @@
 process.env.JWT_SECRET = 'test-secret'
 process.env.MONGO_URI = process.env.MONGO_URI || 'mongodb://unused'
 process.env.CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
+process.env.AI_RATE_LIMIT_MAX = '10000' // this file makes far more than 20 calls a minute; the limiter itself is tested in the integration suite
 
 import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -44,6 +45,7 @@ describe('POST /ai-api/classify-ticket and GET /ai-api/kb-suggestions', () => {
   const originals = {}
   let categories, priorities, ticketStore, kbStore, aiLogs
   let chatCompletionCalls
+  let ticketUpdates = 0
 
   const chain = (result) => {
     let arr = Array.isArray(result) ? [...result] : result
@@ -56,6 +58,7 @@ describe('POST /ai-api/classify-ticket and GET /ai-api/kb-suggestions', () => {
           const entries = Object.entries(spec)
           arr = [...arr].sort((a, b) => {
             for (const [key, dir] of entries) {
+              if (typeof dir === 'object') continue // { $meta: 'textScore' }: the stub has no scores, later keys break the tie
               const cmp = (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir
               if (cmp !== 0) return cmp
             }
@@ -101,10 +104,10 @@ describe('POST /ai-api/classify-ticket and GET /ai-api/kb-suggestions', () => {
     for (const [k, obj, names] of [
       ['cat', CategoryModel, ['find']],
       ['sla', SLAPolicyModel, ['find']],
-      ['ticket', TicketModel, ['findOne']],
+      ['ticket', TicketModel, ['findOne', 'updateOne']],
       ['kb', KnowledgeArticleModel, ['find']],
       ['user', UserModel, ['findById']],
-      ['log', AiLogModel, ['create']],
+      ['log', AiLogModel, ['create', 'findOne']],
       ['groq', groqClient, ['isConfigured', 'chatCompletion']],
     ]) { originals[k] = {}; for (const n of names) originals[k][n] = obj[n] }
 
@@ -113,6 +116,17 @@ describe('POST /ai-api/classify-ticket and GET /ai-api/kb-suggestions', () => {
     SLAPolicyModel.find = (f) => chain(priorities.filter(sift(f)))
     TicketModel.findOne = (f) => chain(ticketStore.find(sift(f)) || null)
     KnowledgeArticleModel.find = (f) => chain(kbStore.filter((d) => matchesFilter(d, f)))
+    TicketModel.updateOne = async (f, u) => {
+      const t = ticketStore.find(sift(f))
+      if (t && u.$set?.['ai.kbSuggestions']) { t.ai = { ...(t.ai ?? {}), kbSuggestions: u.$set['ai.kbSuggestions'] }; ticketUpdates += 1 }
+      return {}
+    }
+    AiLogModel.findOne = (f) => {
+      const q = chain(aiLogs.filter(sift(f)))
+      const list = q.then
+      q.then = (res, rej) => list((arr) => arr[0] ?? null).then(res, rej) // findOne: first match or null
+      return q
+    }
 
     const app = exp()
     app.use(exp.json()); app.use(cookieParser()); app.use(sanitizeBody)
@@ -135,7 +149,7 @@ describe('POST /ai-api/classify-ticket and GET /ai-api/kb-suggestions', () => {
       { _id: oid(303), priority: 'HIGH', level: 3, isActive: true },
       { _id: oid(304), priority: 'CRITICAL', level: 4, isActive: true },
     ]
-    ticketStore = []; kbStore = []; aiLogs = []; chatCompletionCalls = []
+    ticketStore = []; kbStore = []; aiLogs = []; chatCompletionCalls = []; ticketUpdates = 0
     groqClient.isConfigured = () => false
     groqClient.chatCompletion = async (args) => { chatCompletionCalls.push(args); return '{}' }
     // reset the AiLog write stub too — a test that deliberately breaks logging
@@ -400,6 +414,187 @@ describe('POST /ai-api/classify-ticket and GET /ai-api/kb-suggestions', () => {
     test('works when looked up by real Mongo _id, not just publicId', async () => {
       reset(); const t = seedTicket()
       assert.equal((await call('tech', 'GET', `/kb-suggestions/${t._id}`)).status, 200)
+    })
+  })
+
+  describe('classify-ticket: fences, aiLogId, cache', () => {
+    const useAi = (reply) => {
+      groqClient.isConfigured = () => true
+      groqClient.chatCompletion = async (args) => { chatCompletionCalls.push(args); return typeof reply === 'function' ? reply(args) : reply }
+    }
+    const NET = '{"categoryName":"Network","priority":"HIGH","probableIssue":"Router outage"}'
+
+    test('a ```json fenced reply (what models often send) is accepted', async () => {
+      reset(); useAi('```json\n' + NET + '\n```')
+      const r = await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down' })
+      assert.equal(r.body.payload.source, 'ai')
+      assert.equal(r.body.payload.categoryName, 'Network')
+      assert.equal(aiLogs[0].status, 'SUCCESS')
+    })
+
+    test('every answer (AI, cached, fallback) carries the id of its log so the create form can send it back', async () => {
+      reset()
+      let r = await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down' })
+      assert.equal(r.body.payload.source, 'fallback'); assert.equal(r.body.payload.aiLogId, aiLogs[0]._id)
+      useAi(NET)
+      r = await call('emp', 'POST', '/classify-ticket', { title: 'Printer jam' })
+      assert.equal(r.body.payload.aiLogId, aiLogs[1]._id)
+      assert.ok(aiLogs[1].inputHash)
+    })
+
+    test('the same wording again reuses the earlier answer: no second model call, logged as cached', async () => {
+      reset(); useAi(NET)
+      const first = await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down', description: 'cannot connect' })
+      const again = await call('emp', 'POST', '/classify-ticket', { title: '  WIFI  down ', description: 'cannot   connect' })
+      assert.equal(chatCompletionCalls.length, 1, 'one model call for two identical questions')
+      assert.deepEqual({ ...again.body.payload, aiLogId: 0 }, { ...first.body.payload, aiLogId: 0 })
+      assert.equal(aiLogs.length, 2)
+      assert.equal(aiLogs[1].cached, true)
+      assert.notEqual(again.body.payload.aiLogId, first.body.payload.aiLogId, 'each call gets its own log')
+      // different text is a new question
+      await call('emp', 'POST', '/classify-ticket', { title: 'Printer jam' })
+      assert.equal(chatCompletionCalls.length, 2)
+    })
+
+    test('a cached answer is not reused when its category was deactivated, and failures are never cached', async () => {
+      reset(); useAi(NET)
+      await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down' })
+      categories = categories.filter((c) => c._id !== CAT_NETWORK)
+      useAi('{"categoryName":"Hardware","priority":"LOW","probableIssue":"x"}')
+      const r = await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down' })
+      assert.equal(r.body.payload.categoryName, 'Hardware')
+      assert.equal(chatCompletionCalls.length, 2)
+
+      reset(); useAi('not json')
+      await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down' })
+      useAi(NET)
+      const ok = await call('emp', 'POST', '/classify-ticket', { title: 'Wifi down' })
+      assert.equal(ok.body.payload.source, 'ai', 'an earlier ERROR is not served from cache')
+    })
+  })
+
+  describe('kb-suggestions: AI re-ranking (D5)', () => {
+    const useAi = (reply) => {
+      groqClient.isConfigured = () => true
+      groqClient.chatCompletion = async (args) => { chatCompletionCalls.push(args); return typeof reply === 'function' ? reply(args) : reply }
+    }
+    const setup = (n = 3) => {
+      reset()
+      const t = seedTicket({ title: 'wifi keeps dropping', description: 'every few minutes' })
+      const arts = Array.from({ length: n }, (_, i) => seedArticle({ title: `wifi article ${i}`, summary: 'sum', content: 'steps...', category: CAT_NETWORK }))
+      return { t, arts }
+    }
+    const reply = (...items) => JSON.stringify({ results: items })
+
+    test('no key: retrieval only, source "retrieval", model never called, and no article body leaks', async () => {
+      const { t } = setup()
+      const r = await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+      assert.equal(r.body.payload.source, 'retrieval')
+      assert.equal(chatCompletionCalls.length, 0)
+      assert.ok(r.body.payload.articles.every((a) => a.content === undefined && a.relevance === undefined))
+    })
+
+    test('the model re-orders by relevance and adds why + steps; the article text is sent to the model', async () => {
+      const { t, arts } = setup()
+      useAi(reply(
+        { articleId: arts[2].publicId, relevance: 92, why: 'Same symptom', steps: ['Forget the network', 'Rejoin'] },
+        { articleId: arts[0].publicId, relevance: 55, why: 'Related', steps: [] },
+      ))
+      const r = await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+      assert.equal(r.status, 200)
+      const p = r.body.payload
+      assert.equal(p.source, 'ai'); assert.equal(p.cached, false)
+      assert.deepEqual(p.articles.map((a) => a.publicId), [arts[2].publicId, arts[0].publicId])
+      assert.equal(p.articles[0].relevance, 92); assert.equal(p.articles[0].why, 'Same symptom')
+      assert.deepEqual(p.articles[0].steps, ['Forget the network', 'Rejoin'])
+      assert.equal(p.articles[0].content, undefined, 'the body is for the model, not the client')
+      assert.match(chatCompletionCalls[0].user, /wifi keeps dropping/)
+      assert.match(chatCompletionCalls[0].user, new RegExp(arts[1].publicId))
+      assert.equal(aiLogs.at(-1).kind, 'KB_RERANK'); assert.equal(aiLogs.at(-1).status, 'SUCCESS')
+    })
+
+    test('made-up ids, repeats, junk numbers and over-long text are cleaned; irrelevant ones (<20) are left out', async () => {
+      const { t, arts } = setup()
+      useAi(reply(
+        { articleId: 'KB-2026-99999', relevance: 99, why: 'invented', steps: [] },
+        { articleId: arts[0].publicId, relevance: 250, why: 'x'.repeat(900), steps: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 42, ''] },
+        { articleId: arts[0].publicId, relevance: 10, why: 'dup', steps: [] },
+        { articleId: arts[1].publicId, relevance: 'high', why: 'not a number', steps: [] },
+        { articleId: arts[2].publicId, relevance: 5, why: 'barely', steps: [] },
+      ))
+      const r = await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+      const a = r.body.payload.articles
+      assert.deepEqual(a.map((x) => x.publicId), [arts[0].publicId])
+      assert.equal(a[0].relevance, 100)
+      assert.equal(a[0].why.length, 200)
+      assert.equal(a[0].steps.length, 5)
+      assert.ok(a[0].steps.every((s) => typeof s === 'string' && s.length > 0))
+    })
+
+    test('a fenced reply works; an explicit empty list means "nothing here helps" and is honoured', async () => {
+      const { t, arts } = setup()
+      useAi('```json\n' + reply({ articleId: arts[1].publicId, relevance: 70, why: 'ok', steps: [] }) + '\n```')
+      let r = await call('tech', 'GET', `/kb-suggestions/${t.publicId}?refresh=true`)
+      assert.equal(r.body.payload.source, 'ai'); assert.equal(r.body.payload.articles.length, 1)
+      useAi(reply())
+      r = await call('tech', 'GET', `/kb-suggestions/${t.publicId}?refresh=true`)
+      assert.equal(r.body.payload.source, 'ai'); assert.deepEqual(r.body.payload.articles, [])
+    })
+
+    test('garbage, wrong shape or a thrown error fall back to retrieval order, 200, logged as ERROR', async () => {
+      const { t, arts } = setup()
+      for (const bad of ['sorry I cannot', '{"foo":1}', '[]', () => { throw new Error('timed out') }]) {
+        chatCompletionCalls.length = 0
+        useAi(bad)
+        const r = await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+        assert.equal(r.status, 200)
+        assert.equal(r.body.payload.source, 'retrieval')
+        assert.equal(r.body.payload.articles.length, arts.length)
+        assert.equal(aiLogs.at(-1).kind, 'KB_RERANK'); assert.equal(aiLogs.at(-1).status, 'ERROR')
+      }
+      assert.equal(ticketUpdates, 0, 'a failed attempt is never saved on the ticket')
+    })
+
+    test('a good answer is saved on the ticket and served from there next time; ?refresh=true asks the model again', async () => {
+      const { t, arts } = setup()
+      useAi(reply({ articleId: arts[0].publicId, relevance: 80, why: 'match', steps: ['do it'] }))
+      await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+      assert.equal(ticketUpdates, 1)
+      assert.equal(ticketStore[0].ai.kbSuggestions.source, 'ai')
+      const again = await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+      assert.equal(chatCompletionCalls.length, 1, 'second view costs no model call')
+      assert.equal(again.body.payload.cached, true); assert.equal(again.body.payload.source, 'ai')
+      assert.equal(again.body.payload.articles[0].why, 'match'); assert.deepEqual(again.body.payload.articles[0].steps, ['do it'])
+      const fresh = await call('tech', 'GET', `/kb-suggestions/${t.publicId}?refresh=true`)
+      assert.equal(chatCompletionCalls.length, 2); assert.equal(fresh.body.payload.cached, false)
+    })
+
+    test('a saved suggestion for an article that is no longer published is dropped, never shown', async () => {
+      const { t, arts } = setup()
+      useAi(reply({ articleId: arts[0].publicId, relevance: 80, why: 'a', steps: [] }, { articleId: arts[1].publicId, relevance: 70, why: 'b', steps: [] }))
+      await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+      arts[0].status = 'ARCHIVED'
+      const r = await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+      assert.equal(r.body.payload.cached, true)
+      assert.deepEqual(r.body.payload.articles.map((a) => a.publicId), [arts[1].publicId])
+    })
+
+    test('drafts are never shown to the model, and a technician from another team is refused before any model call', async () => {
+      const { t } = setup(1)
+      const draft = seedArticle({ title: 'wifi secret draft', category: CAT_NETWORK, status: 'DRAFT', author: USERS.tech._id })
+      useAi(reply())
+      await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+      assert.ok(!chatCompletionCalls[0].user.includes(draft.publicId))
+      chatCompletionCalls.length = 0
+      assert.equal((await call('techHr', 'GET', `/kb-suggestions/${t.publicId}`)).status, 404)
+      assert.equal(chatCompletionCalls.length, 0)
+    })
+
+    test('no candidate articles at all: no model call', async () => {
+      reset(); const t = seedTicket(); useAi(reply())
+      const r = await call('tech', 'GET', `/kb-suggestions/${t.publicId}`)
+      assert.deepEqual(r.body.payload.articles, [])
+      assert.equal(chatCompletionCalls.length, 0)
     })
   })
 })

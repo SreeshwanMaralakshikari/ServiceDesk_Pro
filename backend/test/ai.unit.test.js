@@ -29,7 +29,7 @@ describe('groqClient', () => {
   })
 
   describe('with a key configured', () => {
-    beforeEach(() => { process.env.GROQ_API_KEY = 'test-key'; delete process.env.GROQ_MODEL })
+    beforeEach(() => { process.env.GROQ_API_KEY = 'test-key'; delete process.env.GROQ_MODEL; delete process.env.AI_MODEL })
 
     test('happy path: posts the right URL/headers/body shape and returns message content', async () => {
       let captured
@@ -46,7 +46,8 @@ describe('groqClient', () => {
       const body = JSON.parse(captured.opts.body)
       assert.equal(body.model, DEFAULT_MODEL)
       assert.deepEqual(body.messages, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'usr' }])
-      assert.equal(body.max_tokens, 50)
+      assert.equal(body.max_tokens, 450, 'gpt-oss models get headroom for their reasoning tokens')
+      assert.equal(body.reasoning_effort, 'low')
       assert.equal(body.temperature, 0.1)
       // the key never leaks into the request body
       assert.ok(!captured.opts.body.includes('test-key'))
@@ -58,6 +59,21 @@ describe('groqClient', () => {
       global.fetch = async (url, opts) => { body = JSON.parse(opts.body); return { ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) } }
       await groqClient.chatCompletion({ system: 's', user: 'u' })
       assert.equal(body.model, 'some-other-model')
+    })
+
+    test('AI_MODEL wins over the older GROQ_MODEL alias; a non-gpt-oss model gets no reasoning options or extra tokens', async () => {
+      process.env.GROQ_MODEL = 'old-alias'; process.env.AI_MODEL = 'llama-something'
+      let body
+      global.fetch = async (url, opts) => { body = JSON.parse(opts.body); return { ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) } }
+      await groqClient.chatCompletion({ system: 's', user: 'u', maxTokens: 123 })
+      assert.equal(body.model, 'llama-something')
+      assert.equal(body.max_tokens, 123)
+      assert.equal(body.reasoning_effort, undefined)
+      delete process.env.AI_MODEL
+    })
+
+    test('the default model is the current one, not the retired llama-3.1-8b-instant', () => {
+      assert.equal(DEFAULT_MODEL, 'openai/gpt-oss-20b')
     })
 
     test('non-2xx response -> rejects with the status code, not a raw fetch error', async () => {

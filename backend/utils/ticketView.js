@@ -18,6 +18,8 @@ export const toTicketView = (ticket, user) => {
   if (!canSeeInternal(view, user)) {
     view.comments = (view.comments ?? []).filter((c) => !c.isInternal)
   }
+  // the AI notes (and article suggestions) are for the support team, not the requester
+  if (user.role === 'EMPLOYEE') delete view.ai
   return view
 }
 
@@ -26,5 +28,6 @@ export const toTicketView = (ticket, user) => {
 export const toTicketListItem = (ticket) => {
   const row = typeof ticket.toObject === 'function' ? ticket.toObject() : { ...ticket }
   delete row.comments
+  delete row.ai
   return row
 }

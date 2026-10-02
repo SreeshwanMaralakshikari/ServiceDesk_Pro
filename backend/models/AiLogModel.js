@@ -7,7 +7,7 @@ import { Schema, model, Types } from 'mongoose'
 const aiLogSchema = new Schema({
   kind: {
     type: String,
-    enum: ['CLASSIFY_TICKET', 'KB_SUGGESTIONS'],
+    enum: ['CLASSIFY_TICKET', 'KB_SUGGESTIONS', 'KB_RERANK'],
     required: [true, 'Kind is required'],
   },
   // SUCCESS: the AI call was used and its response validated.
@@ -27,6 +27,8 @@ const aiLogSchema = new Schema({
   model:       { type: String },
   latencyMs:   { type: Number },
   inputSnippet: { type: String, maxlength: 200 },
+  inputHash:    { type: String, maxlength: 64 }, // sha256 of the normalised input: identical questions reuse an earlier answer
+  cached:       { type: Boolean, default: false }, // true when the answer came from an earlier call, not the model
   output:       { type: Schema.Types.Mixed },
   errorMessage: { type: String, maxlength: 300 },
 }, {
@@ -36,5 +38,6 @@ const aiLogSchema = new Schema({
 })
 
 aiLogSchema.index({ kind: 1, createdAt: -1 })
+aiLogSchema.index({ kind: 1, inputHash: 1, status: 1, createdAt: -1 })
 
 export const AiLogModel = model('ailog', aiLogSchema)

@@ -6,14 +6,16 @@
 // other tests replace a Mongoose model's methods directly (see
 // test/kb.test.js) rather than mocking modules.
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
-export const DEFAULT_MODEL = 'llama-3.1-8b-instant'
+// Groq retires models over time (llama-3.1-8b-instant was the old default). Change the
+// model with the AI_MODEL env var, no code change needed; GROQ_MODEL still works as an alias.
+export const DEFAULT_MODEL = 'openai/gpt-oss-20b'
 const TIMEOUT_MS = 8000
 
 // The model actually in use for a given call — exported so callers (e.g. for
 // an AiLog entry) always report exactly what chatCompletion used, rather than
 // re-deriving `process.env.GROQ_MODEL || DEFAULT_MODEL` a second time and
 // risking the two falling out of sync later.
-export const resolveModel = () => process.env.GROQ_MODEL || DEFAULT_MODEL
+export const resolveModel = () => process.env.AI_MODEL || process.env.GROQ_MODEL || DEFAULT_MODEL
 
 export const groqClient = {
   isConfigured: () => Boolean(process.env.GROQ_API_KEY),
@@ -25,6 +27,9 @@ export const groqClient = {
   chatCompletion: async ({ system, user, maxTokens = 300, temperature = 0.2 }) => {
     if (!groqClient.isConfigured()) throw new Error('AI not configured (no GROQ_API_KEY)')
     const model = resolveModel()
+    // gpt-oss models "think" before answering and those tokens count against the limit,
+    // so they get a low reasoning effort and some headroom, or the JSON could be cut off
+    const reasoning = /gpt-oss/i.test(model)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
     try {
@@ -34,8 +39,9 @@ export const groqClient = {
         body: JSON.stringify({
           model,
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-          max_tokens: maxTokens,
+          max_tokens: reasoning ? maxTokens + 400 : maxTokens,
           temperature,
+          ...(reasoning ? { reasoning_effort: 'low' } : {}),
         }),
         signal: controller.signal,
       })

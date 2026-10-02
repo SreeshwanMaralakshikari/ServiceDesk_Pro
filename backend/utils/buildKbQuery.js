@@ -25,6 +25,10 @@ export const buildKbScope = (user) => {
   }
 }
 
+// relevance order for a text search: best match first, then newest, then _id so equal scores page the same way every time
+export const TEXT_SCORE = { score: { $meta: 'textScore' } }
+export const textRankSort = { score: { $meta: 'textScore' }, publishedAt: -1, _id: -1 }
+
 export const buildKbQuery = (user, filters = {}) => {
   const query = { isDeleted: false, ...buildKbScope(user) }
   const status = asText(filters.status)
@@ -33,5 +37,10 @@ export const buildKbQuery = (user, filters = {}) => {
   if (status) query.status = status
   if (category) query.category = category
   if (q) query.$text = { $search: q }
+  // the manager's review inbox: drafts a technician asked to have reviewed
+  if (asText(filters.review) === 'pending') {
+    query.status = 'DRAFT'
+    query.reviewRequestedAt = { $exists: true }
+  }
   return query
 }

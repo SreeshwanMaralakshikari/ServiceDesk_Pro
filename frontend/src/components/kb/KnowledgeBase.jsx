@@ -7,17 +7,19 @@ import { styles, kbStatusColors } from '../../styles/common.js'
 import { getErrorMessage } from '../../utils/errors.js'
 
 const STAFF_ROLES = ['TECHNICIAN', 'MANAGER', 'ADMIN']
+const REVIEWER_ROLES = ['MANAGER', 'ADMIN']
 
 export const KnowledgeBase = () => {
   const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
   const isStaff = STAFF_ROLES.includes(user?.role)
+  const isReviewer = REVIEWER_ROLES.includes(user?.role)
 
   const [items, setItems] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchText, setSearchText] = useState('') // typed text; only applied on submit
-  const [applied, setApplied] = useState({ q: '', category: '', status: '' })
+  const [applied, setApplied] = useState({ q: '', category: '', status: '', review: '' })
   const [mine, setMine] = useState(false)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -37,7 +39,7 @@ export const KnowledgeBase = () => {
           setItems(data.payload); setTotalPages(1)
         })
       : axiosInstance.get('/kb-api/articles', {
-          params: { q: applied.q || undefined, category: applied.category || undefined, status: applied.status || undefined, page },
+          params: { q: applied.q || undefined, category: applied.category || undefined, status: applied.status || undefined, review: applied.review || undefined, page },
         }).then(({ data }) => {
           if (cancelled) return
           setItems(data.payload.items); setTotalPages(data.payload.totalPages || 1)
@@ -91,6 +93,12 @@ export const KnowledgeBase = () => {
             </select>
           )}
           <button className={styles.btnPrimary} type="submit" disabled={mine}>Search</button>
+          {isReviewer && (
+            <button type="button" className={applied.review ? styles.btnPrimary : styles.btnSecondary} disabled={mine}
+              onClick={() => changeFilter('review', applied.review ? '' : 'pending')}>
+              {applied.review ? 'Showing: pending review' : 'Pending review'}
+            </button>
+          )}
           {isStaff && (
             <button type="button" className={mine ? styles.btnPrimary : styles.btnSecondary} onClick={() => { setMine((v) => !v); setPage(1) }}>
               {mine ? 'Showing: my articles' : 'My articles'}
@@ -122,10 +130,11 @@ export const KnowledgeBase = () => {
                     <div className="text-xs text-slate-500">{a.summary}</div>
                   </td>
                   <td className="py-2 align-top">{a.category?.name || '—'}</td>
-                  {!mine && <td className="py-2 align-top">{a.viewCount}</td>}
+                  {!mine && <td className="py-2 align-top">{a.viewCount}{a.helpfulCount > 0 && <span className="text-xs text-slate-500"> · 👍 {a.helpfulCount}</span>}</td>}
                   {isStaff && (
                     <td className="py-2 align-top">
                       <span className={`${styles.badge} ${kbStatusColors[a.status] || ''}`}>{a.status}</span>
+                      {a.status === 'DRAFT' && a.reviewRequestedAt && <span className={`${styles.badge} bg-amber-100 text-amber-800 ml-1`}>Review requested</span>}
                     </td>
                   )}
                 </tr>

@@ -100,6 +100,30 @@ const ticketSchema = new Schema({
     submittedAt: { type: Date },
   },
 
+  // what the AI said about this ticket. `acceptedByUser` is worked out by the server
+  // from the classify log the create form points at, never taken from the client.
+  // kbSuggestions caches the technician-side article suggestions (D5) until someone refreshes.
+  ai: {
+    source:            { type: String, enum: ['ai', 'fallback'] },
+    aiLogId:           { type: Types.ObjectId, ref: 'ailog' },
+    suggestedCategory: { type: Types.ObjectId, ref: 'category' },
+    suggestedPriority: { type: String },
+    probableIssue:     { type: String, maxlength: 300 },
+    acceptedByUser:    { type: Boolean },
+    kbSuggestions: {
+      at:        { type: Date },
+      source:    { type: String, enum: ['ai'] },
+      matchedBy: { type: String },
+      items: [{
+        _id: false,
+        publicId:  { type: String },
+        relevance: { type: Number, min: 0, max: 100 },
+        why:       { type: String, maxlength: 300 },
+        steps:     [{ type: String, maxlength: 300 }],
+      }],
+    },
+  },
+
   reopenCount: { type: Number, default: 0 },
   version:     { type: Number, default: 0 }, // optimistic concurrency guard
   isDeleted:   { type: Boolean, default: false },

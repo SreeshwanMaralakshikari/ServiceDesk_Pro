@@ -86,14 +86,23 @@ export const TicketDetail = () => {
   // ticket itself has loaded (the endpoint re-derives its own visibility
   // scope from the ticket, so this can't leak anything the caller couldn't
   // already see via GET /ticket-api/tickets/:id)
+  const [kbRefreshing, setKbRefreshing] = useState(false)
+  const loadKbSuggestions = useCallback(async (refresh = false) => {
+    if (refresh) setKbRefreshing(true)
+    try {
+      const { data } = await axiosInstance.get(`/ai-api/kb-suggestions/${ticketId}`, { params: refresh ? { refresh: 'true' } : undefined })
+      setKbSuggestions(data.payload)
+    } catch (err) {
+      if (refresh) toast.error(getErrorMessage(err, 'Could not refresh suggestions'))
+      else setKbSuggestions(null) // quietly optional — never blocks the ticket page
+    } finally {
+      if (refresh) setKbRefreshing(false)
+    }
+  }, [ticketId])
   useEffect(() => {
     if (!ticket || !isStaff) { setKbSuggestions(null); return }
-    let cancelled = false
-    axiosInstance.get(`/ai-api/kb-suggestions/${ticketId}`)
-      .then(({ data }) => { if (!cancelled) setKbSuggestions(data.payload) })
-      .catch(() => { if (!cancelled) setKbSuggestions(null) }) // quietly optional — never blocks the ticket page
-    return () => { cancelled = true }
-  }, [ticket?._id, isStaff, ticketId])
+    loadKbSuggestions()
+  }, [ticket?._id, isStaff, loadKbSuggestions])
 
   useEffect(() => {
     if (user?.role === 'MANAGER' || user?.role === 'ADMIN') {
@@ -273,19 +282,41 @@ export const TicketDetail = () => {
 
         {isStaff && <SimilarPanel ticket={ticket} />}
 
-        {isStaff && kbSuggestions?.articles?.length > 0 && (
-          <div className="mb-6 border-t border-slate-100 pt-4">
-            <h2 className={styles.h2}>Suggested knowledge base articles</h2>
+        {isStaff && kbSuggestions && (kbSuggestions.articles?.length > 0 || kbSuggestions.source === 'ai') && (
+          <div className="mb-6 border-t border-slate-100 pt-4" data-testid="kb-suggestions">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className={styles.h2 + ' mb-0'}>
+                Suggested knowledge base articles{' '}
+                <span className={`${styles.badge} ${kbSuggestions.source === 'ai' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+                  {kbSuggestions.source === 'ai' ? '✨ AI-ranked' : 'Text match'}
+                </span>
+              </h2>
+              <button type="button" className={styles.btnLink} disabled={kbRefreshing} onClick={() => loadKbSuggestions(true)}>
+                {kbRefreshing ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+            {kbSuggestions.articles.length === 0 && <p className="text-sm text-slate-500">The AI found no helpful article for this ticket.</p>}
             <ul className="space-y-2">
               {kbSuggestions.articles.map((a) => (
                 <li key={a._id}>
                   <Link to={`/kb/${a.publicId}`} className="block rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
-                    <p className="text-sm font-medium text-indigo-700">{a.title}</p>
-                    <p className="text-xs text-slate-500">{a.summary}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-indigo-700">{a.title}</p>
+                      {typeof a.relevance === 'number' && <span className="text-xs font-medium text-slate-500 whitespace-nowrap">{a.relevance}% match</span>}
+                    </div>
+                    <p className="text-xs text-slate-500">{a.why || a.summary}</p>
+                    {a.steps?.length > 0 && (
+                      <ol className="mt-2 list-decimal list-inside text-xs text-slate-600 space-y-0.5">
+                        {a.steps.map((st, i) => <li key={i}>{st}</li>)}
+                      </ol>
+                    )}
                   </Link>
                 </li>
               ))}
             </ul>
+            {kbSuggestions.cached && kbSuggestions.generatedAt && (
+              <p className="mt-2 text-xs text-slate-400">Saved {new Date(kbSuggestions.generatedAt).toLocaleString()}. Refresh to ask again.</p>
+            )}
           </div>
         )}
 

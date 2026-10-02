@@ -41,8 +41,11 @@ const CAT_ID = oid(100)
 
 describe('kbTransitions', () => {
   test('publish only from DRAFT', () => {
-    assert.equal(isKbTransitionAllowed('publish', 'DRAFT', 'TECHNICIAN').ok, true)
-    assert.equal(isKbTransitionAllowed('publish', 'PUBLISHED', 'TECHNICIAN').ok, false)
+    assert.equal(isKbTransitionAllowed('publish', 'DRAFT', 'MANAGER').ok, true)
+    assert.equal(isKbTransitionAllowed('publish', 'PUBLISHED', 'MANAGER').ok, false)
+    // D4: technicians never publish, they request review
+    const t = isKbTransitionAllowed('publish', 'DRAFT', 'TECHNICIAN')
+    assert.equal(t.ok, false); assert.match(t.reason, /authorized/)
     assert.equal(isKbTransitionAllowed('publish', 'ARCHIVED', 'ADMIN').ok, false)
   })
   test('archive from DRAFT or PUBLISHED, not ARCHIVED', () => {
@@ -65,6 +68,13 @@ describe('kbTransitions', () => {
         assert.match(r.reason, /authorized/) // route maps this to 403
       }
     }
+  })
+  test('request-review: DRAFT only, technician/manager/admin, keeps status, technician must be the author', () => {
+    for (const role of ['TECHNICIAN', 'MANAGER', 'ADMIN']) assert.equal(isKbTransitionAllowed('request-review', 'DRAFT', role).ok, true)
+    const r = isKbTransitionAllowed('request-review', 'DRAFT', 'TECHNICIAN')
+    assert.equal(r.to, null); assert.equal(r.authorOnlyForTechnician, true)
+    assert.equal(isKbTransitionAllowed('request-review', 'PUBLISHED', 'TECHNICIAN').ok, false)
+    assert.equal(isKbTransitionAllowed('request-review', 'ARCHIVED', 'MANAGER').ok, false)
   })
   test('unknown action rejected', () => {
     assert.equal(isKbTransitionAllowed('delete', 'DRAFT', 'ADMIN').ok, false)
@@ -390,20 +400,22 @@ describe('KB routes over HTTP (stubbed models)', () => {
     assert.equal(after.title, 'mine'); assert.equal(after.summary, 'mgr')
   })
 
-  test('edit: PUBLISHED is editable in place, ARCHIVED is locked (400), bad category 400', async () => {
-    reset(); const p = seedDoc({ status: 'PUBLISHED' }); const a = seedDoc({ status: 'ARCHIVED' })
-    assert.equal((await call('tech', 'PATCH', `/articles/${p.publicId}`, { title: 'typo fix' })).status, 200)
-    assert.equal((await call('tech', 'PATCH', `/articles/${a.publicId}`, { title: 'x' })).status, 400)
-    assert.equal((await call('tech', 'PATCH', `/articles/${p.publicId}`, { categoryId: oid(999) })).status, 400)
+  test('edit: manager edits PUBLISHED in place, technician cannot (400), ARCHIVED is locked (400), bad category 400', async () => {
+    reset(); const p = seedDoc({ status: 'PUBLISHED', author: USERS.tech._id }); const a = seedDoc({ status: 'ARCHIVED' })
+    assert.equal((await call('manager', 'PATCH', `/articles/${p.publicId}`, { title: 'typo fix' })).status, 200)
+    assert.equal((await call('tech', 'PATCH', `/articles/${p.publicId}`, { title: 'sneaky' })).status, 400)
+    assert.equal(cur(p).title, 'typo fix')
+    assert.equal((await call('manager', 'PATCH', `/articles/${a.publicId}`, { title: 'x' })).status, 400)
+    assert.equal((await call('manager', 'PATCH', `/articles/${p.publicId}`, { categoryId: oid(999) })).status, 400)
   })
 
   test('workflow: DRAFT -> publish -> archive -> restore -> publish, with history, timestamps, version', async () => {
     reset(); const d = seedDoc({ status: 'DRAFT', author: USERS.tech._id })
-    let r = await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })
+    let r = await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })
     assert.equal(r.status, 200); assert.equal(r.body.payload.status, 'PUBLISHED'); assert.ok(r.body.payload.publishedAt); assert.equal(r.body.payload.version, 1)
-    r = await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'old', version: 1 })
+    r = await call('manager', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'old', version: 1 })
     assert.equal(r.body.payload.status, 'ARCHIVED'); assert.ok(r.body.payload.archivedAt)
-    r = await call('tech', 'PATCH', `/articles/${d.publicId}/restore`, { version: 2 })
+    r = await call('manager', 'PATCH', `/articles/${d.publicId}/restore`, { version: 2 })
     assert.equal(r.body.payload.status, 'DRAFT'); assert.equal(r.body.payload.archivedAt, undefined)
     r = await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, { version: 3 })
     assert.equal(r.body.payload.status, 'PUBLISHED'); assert.equal(r.body.payload.version, 4)
@@ -413,17 +425,19 @@ describe('KB routes over HTTP (stubbed models)', () => {
 
   test('workflow: illegal transitions -> 400; unknown action -> 400; wrong role -> 403', async () => {
     reset(); const p = seedDoc({ status: 'PUBLISHED' }); const a = seedDoc({ status: 'ARCHIVED' }); const d = seedDoc({ status: 'DRAFT' })
-    assert.equal((await call('tech', 'PATCH', `/articles/${p.publicId}/publish`, { version: 0 })).status, 400)
-    assert.equal((await call('tech', 'PATCH', `/articles/${a.publicId}/archive`, { version: 0 })).status, 400)
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/restore`, { version: 0 })).status, 400)
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/explode`, { version: 0 })).status, 400)
+    assert.equal((await call('manager', 'PATCH', `/articles/${p.publicId}/publish`, { version: 0 })).status, 400)
+    assert.equal((await call('manager', 'PATCH', `/articles/${a.publicId}/archive`, { version: 0 })).status, 400)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/restore`, { version: 0 })).status, 400)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/explode`, { version: 0 })).status, 400)
+    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })).status, 403) // D4
     assert.equal((await call('emp', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })).status, 403)
   })
 
-  test('workflow: another technician cannot publish/archive someone else\'s article; manager can', async () => {
+  test('workflow: no technician (author or not) can publish/archive/restore; manager/admin can', async () => {
     reset(); const d = seedDoc({ status: 'DRAFT', author: USERS.tech._id }); const p = seedDoc({ status: 'PUBLISHED', author: USERS.tech._id })
     assert.equal((await call('tech2', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })).status, 403)
-    assert.equal((await call('tech2', 'PATCH', `/articles/${p.publicId}/archive`, { version: 0 })).status, 403)
+    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })).status, 403) // the author too
+    assert.equal((await call('tech', 'PATCH', `/articles/${p.publicId}/archive`, { version: 0 })).status, 403)
     assert.equal(cur(d).status, 'DRAFT') // untouched
     assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })).status, 200)
     assert.equal((await call('admin', 'PATCH', `/articles/${p.publicId}/archive`, { version: 0 })).status, 200)
@@ -431,14 +445,14 @@ describe('KB routes over HTTP (stubbed models)', () => {
 
   test('workflow: stale version -> 409, matching version ok, missing version -> 400', async () => {
     reset(); const d = seedDoc({ status: 'DRAFT', version: 3 })
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 1 })).status, 409)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, { version: 1 })).status, 409)
     assert.equal(cur(d).status, 'DRAFT')
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, {})).status, 400)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, {})).status, 400)
     assert.equal(cur(d).status, 'DRAFT')
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 3 })).status, 200)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, { version: 3 })).status, 200)
     // a stale version wins over a status mismatch (already published now): the client must refresh
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 3 })).status, 409)
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 4 })).status, 400)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, { version: 3 })).status, 409)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, { version: 4 })).status, 400)
   })
 
   test('history: staff only, author-or-elevated; 404 for missing', async () => {
@@ -521,10 +535,10 @@ describe('KB routes over HTTP (stubbed models)', () => {
 
   test('integrity: a workflow note must be short text, and a bad note leaves the article untouched', async () => {
     reset(); const d = seedDoc({ status: 'PUBLISHED', author: USERS.tech._id })
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'x'.repeat(501), version: 0 })).status, 400)
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: { a: 1 }, version: 0 })).status, 400)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'x'.repeat(501), version: 0 })).status, 400)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/archive`, { note: { a: 1 }, version: 0 })).status, 400)
     assert.equal(cur(d).status, 'PUBLISHED'); assert.equal(cur(d).version, 0)
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'x'.repeat(500), version: 0 })).status, 200)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'x'.repeat(500), version: 0 })).status, 200)
   })
 
   test('operator injection in body is stripped by sanitizeBody before reaching the route', async () => {

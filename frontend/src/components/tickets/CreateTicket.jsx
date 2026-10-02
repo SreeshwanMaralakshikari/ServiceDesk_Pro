@@ -43,7 +43,8 @@ export const CreateTicket = () => {
     e.preventDefault()
     setLoading(true)
     try {
-      const { data } = await axiosInstance.post('/ticket-api/tickets', form)
+      // aiLogId only says which suggestion was shown; the server works out whether it was kept
+      const { data } = await axiosInstance.post('/ticket-api/tickets', { ...form, aiLogId: suggestion?.aiLogId || undefined })
       toast.success(data.payload.status === 'PENDING_APPROVAL' ? `Ticket ${data.payload.publicId} submitted for approval` : `Ticket ${data.payload.publicId} created`)
       navigate(`/tickets/${data.payload.publicId}`)
     } catch (err) {

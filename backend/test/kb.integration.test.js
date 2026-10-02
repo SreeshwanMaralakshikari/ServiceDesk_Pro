@@ -175,12 +175,13 @@ describe('real server.js + KB (only DB/cron stubbed)', () => {
     const id = created.body.payload.publicId
     assert.equal((await call('tech', 'GET', `/kb-api/articles/${id}`)).status, 200)
     assert.equal((await call('emp', 'GET', `/kb-api/articles/${id}`)).status, 404)
-    assert.equal((await call('tech', 'PATCH', `/kb-api/articles/${id}/publish`, { version: 0 })).status, 200)
+    assert.equal((await call('manager', 'PATCH', `/kb-api/articles/${id}/publish`, { version: 0 })).status, 200)
     const list = await call('emp', 'GET', '/kb-api/articles')
     assert.equal(list.body.payload.total, 1)
     assert.equal((await call('emp', 'GET', `/kb-api/articles/${id}`)).status, 200)
     assert.equal((await call('tech', 'DELETE', `/kb-api/articles/${id}`)).status, 400) // still published
-    assert.equal((await call('tech', 'PATCH', `/kb-api/articles/${id}/archive`, { version: 1 })).status, 200)
+    assert.equal((await call('tech', 'PATCH', `/kb-api/articles/${id}/archive`, { version: 1 })).status, 403)
+    assert.equal((await call('manager', 'PATCH', `/kb-api/articles/${id}/archive`, { version: 1 })).status, 200)
     assert.equal((await call('tech', 'DELETE', `/kb-api/articles/${id}`)).status, 200)
     assert.equal((await call('manager', 'GET', '/kb-api/articles')).body.payload.total, 0)
   })

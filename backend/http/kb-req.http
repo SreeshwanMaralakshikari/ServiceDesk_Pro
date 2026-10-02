@@ -37,7 +37,7 @@ Content-Type: application/json
 ### fetch one article (by _id or publicId, e.g. KB-2026-00001)
 GET {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID
 
-### edit a draft or published article (author, or manager/admin)
+### edit: a technician can edit only their OWN DRAFT; a manager/admin can edit any non-archived article
 PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID
 Content-Type: application/json
 
@@ -45,7 +45,7 @@ Content-Type: application/json
   "summary": "Updated summary text"
 }
 
-### publish
+### publish — MANAGER or ADMIN only (a technician gets 403: ask for a review instead)
 PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/publish
 Content-Type: application/json
 
@@ -53,7 +53,7 @@ Content-Type: application/json
   "version": 1
 }
 
-### archive (requires no note, but one can be added)
+### archive — MANAGER or ADMIN only (a note is optional)
 PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/archive
 Content-Type: application/json
 
@@ -62,7 +62,7 @@ Content-Type: application/json
   "version": 1
 }
 
-### restore an archived article back to draft
+### restore an archived article back to draft — MANAGER or ADMIN only
 PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/restore
 Content-Type: application/json
 
@@ -95,3 +95,48 @@ GET {{baseUrl}}/kb-api/articles?limit=500
 
 ### array filter is ignored -> still PUBLISHED only for an Employee
 GET {{baseUrl}}/kb-api/articles?status[]=DRAFT&status[]=ARCHIVED
+
+### --- KB-AI-COMPLETION: review flow and helpful votes ---
+
+### technician asks for a review of their own DRAFT (author only; status stays DRAFT,
+### team managers — or admins if the team has none — get a notification)
+PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/request-review
+Content-Type: application/json
+
+{ "version": 0, "note": "ready for review" }
+
+### request review on a PUBLISHED article -> 400
+### request review on someone else's draft as a technician -> 403
+
+### drafts waiting for a manager (MANAGER/ADMIN only; anyone else -> 403)
+GET {{baseUrl}}/kb-api/articles?review=pending
+
+### technician edits a PUBLISHED article -> 400 "technicians can only edit drafts"
+PATCH {{baseUrl}}/kb-api/articles/PASTE_PUBLISHED_ARTICLE_ID
+Content-Type: application/json
+
+{ "title": "sneaky edit" }
+
+### technician publishes -> 403
+PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/publish
+Content-Type: application/json
+
+{ "version": 0 }
+
+### mark a PUBLISHED article helpful (once per person; returns the new count)
+PUT {{baseUrl}}/kb-api/articles/PASTE_PUBLISHED_ARTICLE_ID/helpful
+Content-Type: application/json
+
+{ "helpful": true }
+
+### take the vote back
+PUT {{baseUrl}}/kb-api/articles/PASTE_PUBLISHED_ARTICLE_ID/helpful
+Content-Type: application/json
+
+{ "helpful": false }
+
+### not a boolean -> 400; own article -> 400; draft/archived -> 404
+PUT {{baseUrl}}/kb-api/articles/PASTE_PUBLISHED_ARTICLE_ID/helpful
+Content-Type: application/json
+
+{ "helpful": "yes" }

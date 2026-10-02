@@ -4,13 +4,30 @@
 ### as ticket creation)
 
 ### classify a ticket before submitting it — works with no GROQ_API_KEY set
-### (returns a heuristic "fallback" suggestion instead of an error)
+### (returns a heuristic "fallback" suggestion instead of an error).
+### The answer includes "aiLogId": send it back when you create the ticket.
 POST {{baseUrl}}/ai-api/classify-ticket
 Content-Type: application/json
 
 {
   "title": "Wi-Fi keeps dropping on the 3rd floor",
   "description": "My laptop disconnects from CorpNet every few minutes since this morning. It's urgent, I can't join my calls."
+}
+
+### the same text again (within 24 h, key set) is answered from the earlier result, no model call
+
+### create the ticket and tell the server which suggestion you saw.
+### ticket.ai.acceptedByUser is computed by the server (category AND priority unchanged).
+### Someone else's aiLogId, a junk id or a made-up "acceptedByUser" is ignored.
+POST {{baseUrl}}/ticket-api/tickets
+Content-Type: application/json
+
+{
+  "title": "Wi-Fi keeps dropping on the 3rd floor",
+  "description": "My laptop disconnects every few minutes",
+  "categoryId": "PASTE_CATEGORY_ID",
+  "priority": "HIGH",
+  "aiLogId": "PASTE_AI_LOG_ID"
 }
 
 ### missing input -> 400
@@ -21,9 +38,13 @@ Content-Type: application/json
 
 ### kb-suggestions — login as a Technician/Manager/Admin first
 ### (a plain Technician only gets suggestions for tickets in their own
-### department, the same scope as GET /ticket-api/tickets/:id)
-GET {{baseUrl}}/ai-api/kb-suggestions/TKT-2026-00001
-
-### per-user rate limit: more than AI_RATE_LIMIT_MAX (20) calls a minute -> 429
-### kb-suggestions only ever return PUBLISHED articles (never drafts/archived)
+### department, the same scope as GET /ticket-api/tickets/:id).
+### Only PUBLISHED articles are ever suggested. With a key: AI-ranked (relevance, why, steps),
+### saved on the ticket; without one or on failure: text order, source "retrieval".
 GET {{baseUrl}}/ai-api/kb-suggestions/PASTE_TICKET_PUBLIC_ID
+
+### ask the model again instead of using the saved answer
+GET {{baseUrl}}/ai-api/kb-suggestions/PASTE_TICKET_PUBLIC_ID?refresh=true
+
+### an employee -> 403; a technician from another team -> 404
+### per-user rate limit: more than AI_RATE_LIMIT_MAX (20) calls a minute -> 429
