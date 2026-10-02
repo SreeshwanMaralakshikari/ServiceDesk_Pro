@@ -1,3 +1,5 @@
+import { asText } from './queryParams.js'
+
 // role-based scope is always applied first; any client filters are ANDed
 // on top of it so a filter can only narrow the results, never widen them —
 // same rule as buildTicketQuery.js.
@@ -22,14 +24,6 @@ export const buildKbScope = (user) => {
       return { $or: [{ status: 'PUBLISHED' }] }
   }
 }
-
-// filter values come straight from the query string, where a repeated key
-// (?q=a&q=b) is an array and a bracketed key (?status[$ne]=x) can be an
-// operator object under some query-parser settings. Only plain non-blank
-// strings are accepted; anything else is treated as "no filter" rather than
-// forwarded to MongoDB ($search needs a string; an operator object in
-// `status`/`category` would be a query-operator injection).
-const asText = (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined)
 
 export const buildKbQuery = (user, filters = {}) => {
   const query = { isDeleted: false, ...buildKbScope(user) }

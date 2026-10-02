@@ -3,10 +3,12 @@
 // UTC milliseconds shifted by the fixed offset, so they never depend on
 // the server's local timezone.
 
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+import { APP_TIME_ZONE, APP_UTC_OFFSET_MINUTES } from './timezone.js'
+
+const IST_OFFSET_MS = APP_UTC_OFFSET_MINUTES * 60 * 1000
 const DAY_MS = 24 * 60 * 60 * 1000
 
-export const DEFAULT_BUSINESS_HOURS = { days: [1, 2, 3, 4, 5], start: '09:00', end: '18:00', timezone: 'Asia/Kolkata' }
+export const DEFAULT_BUSINESS_HOURS = { days: [1, 2, 3, 4, 5], start: '09:00', end: '18:00', timezone: APP_TIME_ZONE }
 
 const parseHM = (hm) => {
   const [h, m] = hm.split(':').map(Number)

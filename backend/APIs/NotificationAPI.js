@@ -1,6 +1,7 @@
 import exp from 'express'
 import { NotificationModel } from '../models/NotificationModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
+import { getPagination, toPage } from '../utils/pagination.js'
 
 export const notificationApp = exp.Router()
 const ALL_ROLES = ['ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOYEE', 'ASSET_MANAGER']
@@ -8,14 +9,13 @@ notificationApp.use(verifyToken(...ALL_ROLES))
 
 notificationApp.get('/my-notifications', async (req, res, next) => {
   try {
-    const { page = 1, limit = 20 } = req.query
-    const skip = (Number(page) - 1) * Number(limit)
+    const paging = getPagination(req.query)
     const [items, total] = await Promise.all([
-      NotificationModel.find({ user: req.user.id }).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
+      NotificationModel.find({ user: req.user.id }).sort({ createdAt: -1 }).skip(paging.skip).limit(paging.limit),
       NotificationModel.countDocuments({ user: req.user.id }),
     ])
     //send res
-    res.status(200).json({ message: 'notifications fetched', payload: { items, total, page: Number(page) } })
+    res.status(200).json({ message: 'notifications fetched', payload: toPage(items, total, paging) })
   } catch (err) { next(err) }
 })
 

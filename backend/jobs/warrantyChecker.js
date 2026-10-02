@@ -1,7 +1,7 @@
-import cron from 'node-cron'
 import { AssetModel } from '../models/AssetModel.js'
 import { UserModel } from '../models/UserModel.js'
 import { notifyMany } from '../utils/createNotification.js'
+import { cronStatus } from './status.js'
 
 const WARRANTY_WINDOW_DAYS = 30
 
@@ -33,7 +33,19 @@ export const runWarrantyCheck = async () => {
   return assets.length
 }
 
-export const startWarrantyChecker = () => {
+// node-cron is imported lazily here, not as a top-level `import` — see the
+// matching comment in jobs/slaChecker.js for why: a top-level import would
+// crash the ENTIRE server at startup if the package isn't installed yet,
+// not just disable this one background job.
+export const startWarrantyChecker = async () => {
+  let cron
+  try {
+    cron = (await import('node-cron')).default
+  } catch {
+    cronStatus.warranty = 'disabled'
+    console.log('Warranty checker disabled: node-cron is not installed (run `npm install` in backend/).')
+    return
+  }
   // once a day at 09:00 server time — server clock, not IST business hours;
   // this is a background notification job, not an SLA deadline
   cron.schedule('0 9 * * *', async () => {
@@ -44,5 +56,6 @@ export const startWarrantyChecker = () => {
       console.log('Warranty checker failed:', err.message)
     }
   })
+  cronStatus.warranty = 'running'
   console.log('Warranty checker scheduled (daily at 09:00)')
 }

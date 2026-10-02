@@ -16,7 +16,7 @@ vendorApp.get('/vendors', async (req, res, next) => {
 
 vendorApp.post('/vendors', async (req, res, next) => {
   try {
-    const { name, contactPerson, email, phone, address, servicesProvided } = req.body
+    const { name, contactPerson, email, phone, address, servicesProvided } = req.body ?? {}
     if (!name) {
       //send res
       return res.status(400).json({ message: 'name is required' })
@@ -29,7 +29,7 @@ vendorApp.post('/vendors', async (req, res, next) => {
 
 vendorApp.patch('/vendors/:vendorId', async (req, res, next) => {
   try {
-    const { name, contactPerson, email, phone, address, servicesProvided, isActive } = req.body
+    const { name, contactPerson, email, phone, address, servicesProvided, isActive } = req.body ?? {}
     if (isActive === false) {
       const inUse = await AssetModel.exists({ vendor: req.params.vendorId, isDeleted: false, status: { $ne: 'RETIRED' } })
       if (inUse) {

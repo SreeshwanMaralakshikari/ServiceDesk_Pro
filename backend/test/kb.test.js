@@ -16,6 +16,7 @@ import cookieParser from 'cookie-parser'
 import jwt from 'jsonwebtoken'
 // sift: declared as a devDependency, pinned to the exact version mongoose itself locks
 import sift from 'sift'
+import { applyUpdate } from '../testkit/applyUpdate.js'
 
 import { KnowledgeArticleModel } from '../models/KnowledgeArticleModel.js'
 import { CategoryModel } from '../models/CategoryModel.js'
@@ -222,7 +223,7 @@ describe('KB routes over HTTP (stubbed models)', () => {
 
   before(async () => {
     for (const [k, obj, names] of [
-      ['kb', KnowledgeArticleModel, ['findOne', 'find', 'countDocuments', 'updateOne', 'create']],
+      ['kb', KnowledgeArticleModel, ['findOne', 'findOneAndUpdate', 'find', 'countDocuments', 'updateOne', 'create']],
       ['cat', CategoryModel, ['findOne']],
       ['user', UserModel, ['findById']],
     ]) { originals[k] = {}; for (const n of names) originals[k][n] = obj[n] }
@@ -231,6 +232,13 @@ describe('KB routes over HTTP (stubbed models)', () => {
     CategoryModel.findOne = (f) => chain(String(f._id) === CAT_ID ? { _id: CAT_ID } : null)
     // like real Mongoose, hand back a separate hydrated copy, not the stored object itself
     KnowledgeArticleModel.findOne = (f) => { const hit = store.find(sift(f)); return chain(hit ? hydrateCopy(hit) : null) }
+    // atomic update stub: match on the filter (status/version included), apply the operators, return the new document
+    KnowledgeArticleModel.findOneAndUpdate = async (f, u) => {
+      const i = store.findIndex(sift(JSON.parse(JSON.stringify(f))))
+      if (i < 0) return null
+      applyUpdate(store[i], u)
+      return hydrateCopy(store[i])
+    }
     KnowledgeArticleModel.find = (f) => chain(store.filter(sift(strip(f))).map(hydrateCopy))
     KnowledgeArticleModel.countDocuments = async (f) => store.filter(sift(strip(f))).length
     KnowledgeArticleModel.updateOne = async (f, u) => {
@@ -387,13 +395,13 @@ describe('KB routes over HTTP (stubbed models)', () => {
 
   test('workflow: DRAFT -> publish -> archive -> restore -> publish, with history, timestamps, version', async () => {
     reset(); const d = seedDoc({ status: 'DRAFT', author: USERS.tech._id })
-    let r = await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, {})
+    let r = await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })
     assert.equal(r.status, 200); assert.equal(r.body.payload.status, 'PUBLISHED'); assert.ok(r.body.payload.publishedAt); assert.equal(r.body.payload.version, 1)
-    r = await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'old' })
+    r = await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'old', version: 1 })
     assert.equal(r.body.payload.status, 'ARCHIVED'); assert.ok(r.body.payload.archivedAt)
-    r = await call('tech', 'PATCH', `/articles/${d.publicId}/restore`, {})
+    r = await call('tech', 'PATCH', `/articles/${d.publicId}/restore`, { version: 2 })
     assert.equal(r.body.payload.status, 'DRAFT'); assert.equal(r.body.payload.archivedAt, undefined)
-    r = await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, {})
+    r = await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, { version: 3 })
     assert.equal(r.body.payload.status, 'PUBLISHED'); assert.equal(r.body.payload.version, 4)
     assert.deepEqual(r.body.payload.history.map((h) => `${h.fromStatus}>${h.toStatus}`), ['DRAFT>PUBLISHED', 'PUBLISHED>ARCHIVED', 'ARCHIVED>DRAFT', 'DRAFT>PUBLISHED'])
     assert.equal(r.body.payload.history[1].note, 'old')
@@ -401,29 +409,32 @@ describe('KB routes over HTTP (stubbed models)', () => {
 
   test('workflow: illegal transitions -> 400; unknown action -> 400; wrong role -> 403', async () => {
     reset(); const p = seedDoc({ status: 'PUBLISHED' }); const a = seedDoc({ status: 'ARCHIVED' }); const d = seedDoc({ status: 'DRAFT' })
-    assert.equal((await call('tech', 'PATCH', `/articles/${p.publicId}/publish`, {})).status, 400)
-    assert.equal((await call('tech', 'PATCH', `/articles/${a.publicId}/archive`, {})).status, 400)
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/restore`, {})).status, 400)
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/explode`, {})).status, 400)
-    assert.equal((await call('emp', 'PATCH', `/articles/${d.publicId}/publish`, {})).status, 403)
+    assert.equal((await call('tech', 'PATCH', `/articles/${p.publicId}/publish`, { version: 0 })).status, 400)
+    assert.equal((await call('tech', 'PATCH', `/articles/${a.publicId}/archive`, { version: 0 })).status, 400)
+    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/restore`, { version: 0 })).status, 400)
+    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/explode`, { version: 0 })).status, 400)
+    assert.equal((await call('emp', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })).status, 403)
   })
 
   test('workflow: another technician cannot publish/archive someone else\'s article; manager can', async () => {
     reset(); const d = seedDoc({ status: 'DRAFT', author: USERS.tech._id }); const p = seedDoc({ status: 'PUBLISHED', author: USERS.tech._id })
-    assert.equal((await call('tech2', 'PATCH', `/articles/${d.publicId}/publish`, {})).status, 403)
-    assert.equal((await call('tech2', 'PATCH', `/articles/${p.publicId}/archive`, {})).status, 403)
+    assert.equal((await call('tech2', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })).status, 403)
+    assert.equal((await call('tech2', 'PATCH', `/articles/${p.publicId}/archive`, { version: 0 })).status, 403)
     assert.equal(cur(d).status, 'DRAFT') // untouched
-    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, {})).status, 200)
-    assert.equal((await call('admin', 'PATCH', `/articles/${p.publicId}/archive`, {})).status, 200)
+    assert.equal((await call('manager', 'PATCH', `/articles/${d.publicId}/publish`, { version: 0 })).status, 200)
+    assert.equal((await call('admin', 'PATCH', `/articles/${p.publicId}/archive`, { version: 0 })).status, 200)
   })
 
-  test('workflow: stale version -> 409, matching version ok, no version -> ok', async () => {
+  test('workflow: stale version -> 409, matching version ok, missing version -> 400', async () => {
     reset(); const d = seedDoc({ status: 'DRAFT', version: 3 })
     assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 1 })).status, 409)
     assert.equal(cur(d).status, 'DRAFT')
+    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, {})).status, 400)
+    assert.equal(cur(d).status, 'DRAFT')
     assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 3 })).status, 200)
-    const d2 = seedDoc({ status: 'DRAFT' })
-    assert.equal((await call('tech', 'PATCH', `/articles/${d2.publicId}/publish`, {})).status, 200)
+    // a stale version wins over a status mismatch (already published now): the client must refresh
+    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 3 })).status, 409)
+    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/publish`, { version: 4 })).status, 400)
   })
 
   test('history: staff only, author-or-elevated; 404 for missing', async () => {
@@ -450,8 +461,8 @@ describe('KB routes over HTTP (stubbed models)', () => {
     reset(); const d = seedDoc({ status: 'DRAFT', author: USERS.tech._id })
     assert.equal((await callBare('tech', 'POST', '/articles')).status, 400)               // create: missing fields
     assert.equal((await callBare('tech', 'PATCH', `/articles/${d.publicId}`)).status, 200) // edit: nothing to change
-    assert.equal((await callBare('tech', 'PATCH', `/articles/${d.publicId}/publish`)).status, 200) // action needs no body
-    assert.equal(cur(d).status, 'PUBLISHED')
+    assert.equal((await callBare('tech', 'PATCH', `/articles/${d.publicId}/publish`)).status, 400) // version is required, so no body is a clean 400
+    assert.equal(cur(d).status, 'DRAFT')
   })
 
   test('crafted query strings (?q=a&q=b, ?status[$ne]=x) are answered with 200 and never leak scope', async () => {
@@ -506,10 +517,10 @@ describe('KB routes over HTTP (stubbed models)', () => {
 
   test('integrity: a workflow note must be short text, and a bad note leaves the article untouched', async () => {
     reset(); const d = seedDoc({ status: 'PUBLISHED', author: USERS.tech._id })
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'x'.repeat(501) })).status, 400)
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: { a: 1 } })).status, 400)
+    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'x'.repeat(501), version: 0 })).status, 400)
+    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: { a: 1 }, version: 0 })).status, 400)
     assert.equal(cur(d).status, 'PUBLISHED'); assert.equal(cur(d).version, 0)
-    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'x'.repeat(500) })).status, 200)
+    assert.equal((await call('tech', 'PATCH', `/articles/${d.publicId}/archive`, { note: 'x'.repeat(500), version: 0 })).status, 200)
   })
 
   test('operator injection in body is stripped by sanitizeBody before reaching the route', async () => {

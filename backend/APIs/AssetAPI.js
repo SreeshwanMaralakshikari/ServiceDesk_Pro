@@ -5,7 +5,10 @@ import { TicketModel } from '../models/TicketModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
 import { generateSequentialId } from '../utils/generateSequentialId.js'
 import { idOrPublicIdFilter } from '../utils/findByIdOrPublicId.js'
-import { isAssetTransitionAllowed } from '../utils/assetTransitions.js'
+import { ASSET_TRANSITIONS, isAssetTransitionAllowed } from '../utils/assetTransitions.js'
+import { atomicTransition, isValidVersion, VERSION_REQUIRED_MESSAGE } from '../utils/atomicTransition.js'
+import { getPagination, toPage } from '../utils/pagination.js'
+import { asText } from '../utils/queryParams.js'
 import { createNotification } from '../utils/createNotification.js'
 
 export const assetApp = exp.Router()
@@ -34,26 +37,29 @@ assetApp.get('/my-assets', verifyToken('ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOY
 // list — Asset Manager/Admin/Technician (read-only for Technician)
 assetApp.get('/assets', verifyToken(...READ_ROLES), async (req, res, next) => {
   try {
-    const { status, type, department, q, page = 1, limit = 20 } = req.query
     const query = { isDeleted: false }
+    const status = asText(req.query.status)
+    const type = asText(req.query.type)
+    const department = asText(req.query.department)
+    const q = asText(req.query.q)
     if (status) query.status = status
     if (type) query.type = type
     if (department) query.department = department
     if (q) query.$text = { $search: q }
+    const paging = getPagination(req.query)
 
-    const skip = (Number(page) - 1) * Number(limit)
     const [items, total] = await Promise.all([
       AssetModel.find(query)
         .populate('vendor', 'name')
         .populate('assignedTo', 'firstName lastName email')
         .populate('department', 'name')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(Number(limit)),
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(paging.skip)
+        .limit(paging.limit),
       AssetModel.countDocuments(query),
     ])
     //send res
-    res.status(200).json({ message: 'assets fetched', payload: { items, total, page: Number(page), totalPages: Math.ceil(total / limit) } })
+    res.status(200).json({ message: 'assets fetched', payload: toPage(items, total, paging) })
   } catch (err) { next(err) }
 })
 
@@ -75,7 +81,7 @@ assetApp.get('/assets/warranty-expiring', verifyToken(...READ_ROLES), async (req
 // create
 assetApp.post('/assets', verifyToken(...MANAGE_ROLES), async (req, res, next) => {
   try {
-    const { name, type, assetClass, serialNumber, licenseKey, vendor, purchaseDate, purchaseCost, warrantyExpiry, department, location } = req.body
+    const { name, type, assetClass, serialNumber, licenseKey, vendor, purchaseDate, purchaseCost, warrantyExpiry, department, location } = req.body ?? {}
     if (!name || !type || !assetClass) {
       //send res
       return res.status(400).json({ message: 'name, type and assetClass are required' })
@@ -113,7 +119,7 @@ assetApp.get('/assets/:assetId', verifyToken(...READ_ROLES), async (req, res, ne
 // resets warrantyNotified so the warranty checker will notify again.
 assetApp.patch('/assets/:assetId', verifyToken(...MANAGE_ROLES), async (req, res, next) => {
   try {
-    const { name, assetClass, serialNumber, licenseKey, vendor, purchaseDate, purchaseCost, warrantyExpiry, department, location } = req.body
+    const { name, assetClass, serialNumber, licenseKey, vendor, purchaseDate, purchaseCost, warrantyExpiry, department, location } = req.body ?? {}
     const asset = await AssetModel.findOne({ ...idOrPublicIdFilter(req.params.assetId), isDeleted: false })
     if (!asset) {
       //send res
@@ -141,7 +147,7 @@ assetApp.patch('/assets/:assetId', verifyToken(...MANAGE_ROLES), async (req, res
 // maintenance log — Asset Manager/Admin/Technician
 assetApp.post('/assets/:assetId/maintenance', verifyToken(...READ_ROLES), async (req, res, next) => {
   try {
-    const { type, vendor, cost, note, date } = req.body
+    const { type, vendor, cost, note, date } = req.body ?? {}
     if (!type) {
       //send res
       return res.status(400).json({ message: 'maintenance type is required' })
@@ -190,19 +196,29 @@ assetApp.get('/assets/:assetId/tickets', verifyToken(...READ_ROLES), async (req,
 })
 
 // replace — its own two-asset operation, registered before the generic
-// :action route below (same lesson as the ticket priority-route collision
-// in Phase 3: specific literal paths must come first)
+// :action route below (same lesson as the ticket priority-route collision:
+// specific literal paths must come first). Each write is atomic and
+// version-guarded; the pair is still not one transaction, so if the second
+// write fails the first is undone by hand (transaction version: HARDENING).
 assetApp.patch('/assets/:assetId/replace', verifyToken(...MANAGE_ROLES), async (req, res, next) => {
   try {
-    const { newAssetId, note } = req.body
-    if (!newAssetId) {
+    const { newAssetId, note, version } = req.body ?? {}
+    if (!newAssetId || typeof newAssetId !== 'string') {
       //send res
       return res.status(400).json({ message: 'newAssetId is required' })
+    }
+    if (!isValidVersion(version)) {
+      //send res
+      return res.status(400).json({ message: VERSION_REQUIRED_MESSAGE })
     }
     const oldAsset = await AssetModel.findOne({ ...idOrPublicIdFilter(req.params.assetId), isDeleted: false })
     if (!oldAsset) {
       //send res
       return res.status(404).json({ message: 'asset not found' })
+    }
+    if (version !== oldAsset.version) {
+      //send res
+      return res.status(409).json({ message: 'asset was updated by someone else, please refresh' })
     }
     if (!['ASSIGNED', 'IN_REPAIR'].includes(oldAsset.status) || !oldAsset.assignedTo) {
       //send res
@@ -219,36 +235,43 @@ assetApp.patch('/assets/:assetId/replace', verifyToken(...MANAGE_ROLES), async (
     }
 
     const assignee = oldAsset.assignedTo
-    const oldFromStatus = oldAsset.status // capture before mutating — spec allows ASSIGNED *or* IN_REPAIR here
-    // do both writes, and if the second fails, undo the first — kept as one
-    // logical operation per the plan, without a Mongo transaction (none
-    // available on the free-tier replica-set-less setup)
-    oldAsset.status = 'REPLACED'
-    oldAsset.replacedBy = newAsset._id
-    oldAsset.version += 1
-    oldAsset.lifecycleHistory.push({ fromStatus: oldFromStatus, toStatus: 'REPLACED', by: req.user.id, note })
-    await oldAsset.save()
+    const oldFromStatus = oldAsset.status // capture before writing — spec allows ASSIGNED *or* IN_REPAIR here
+    const now = new Date()
 
+    const first = await atomicTransition({
+      Model: AssetModel, doc: oldAsset, action: 'replace', noun: 'asset', from: ['ASSIGNED', 'IN_REPAIR'], version,
+      set: { status: 'REPLACED', replacedBy: newAsset._id },
+      push: { lifecycleHistory: { fromStatus: oldFromStatus, toStatus: 'REPLACED', by: req.user.id, note, at: now } },
+    })
+    if (first.error) {
+      //send res
+      return res.status(first.error.status).json({ message: first.error.message })
+    }
+
+    let second
     try {
-      newAsset.status = 'ASSIGNED'
-      newAsset.assignedTo = assignee
-      newAsset.replaces = oldAsset._id
-      newAsset.version += 1
-      newAsset.lifecycleHistory.push({ fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', by: req.user.id, note: note || `replacing ${oldAsset.publicId}` })
-      await newAsset.save()
+      second = await atomicTransition({
+        Model: AssetModel, doc: newAsset, action: 'be used as a replacement while', noun: 'asset', from: ['IN_STOCK'], version: newAsset.version,
+        set: { status: 'ASSIGNED', assignedTo: assignee, replaces: oldAsset._id },
+        push: { lifecycleHistory: { fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', by: req.user.id, note: note || `replacing ${oldAsset.publicId}`, at: now } },
+      })
     } catch (innerErr) {
+      second = { error: { status: 500, thrown: innerErr } }
+    }
+    if (second.error) {
       // undo the first write so we never end up with an orphaned REPLACED asset
-      oldAsset.status = oldFromStatus
-      oldAsset.version -= 1 // revert the bump too, so a retry with the original version doesn't spuriously 409
-      oldAsset.replacedBy = undefined
-      oldAsset.lifecycleHistory.pop()
-      await oldAsset.save()
-      throw innerErr
+      await AssetModel.updateOne(
+        { _id: oldAsset._id, version: first.doc.version },
+        { $set: { status: oldFromStatus }, $unset: { replacedBy: '' }, $pop: { lifecycleHistory: 1 }, $inc: { version: -1 } },
+      )
+      if (second.error.thrown) throw second.error.thrown
+      //send res
+      return res.status(second.error.status).json({ message: second.error.message })
     }
 
     await createNotification({ user: assignee, type: 'GENERAL', message: `Your asset ${oldAsset.publicId} was replaced with ${newAsset.publicId}`, link: '/my-assets' })
     //send res
-    res.status(200).json({ message: 'asset replaced', payload: { oldAsset, newAsset } })
+    res.status(200).json({ message: 'asset replaced', payload: { oldAsset: first.doc, newAsset: second.doc } })
   } catch (err) { next(err) }
 })
 
@@ -256,24 +279,37 @@ assetApp.patch('/assets/:assetId/replace', verifyToken(...MANAGE_ROLES), async (
 assetApp.patch('/assets/:assetId/:action', verifyToken(...READ_ROLES), async (req, res, next) => {
   try {
     const { assetId, action } = req.params
-    const { assignedTo, note, version } = req.body
+    const { assignedTo, note, version } = req.body ?? {}
 
     const asset = await AssetModel.findOne({ ...idOrPublicIdFilter(assetId), isDeleted: false })
     if (!asset) {
       //send res
       return res.status(404).json({ message: 'asset not found' })
     }
+    if (!isValidVersion(version)) {
+      //send res
+      return res.status(400).json({ message: VERSION_REQUIRED_MESSAGE })
+    }
 
     const check = isAssetTransitionAllowed(action, asset.status, req.user.role, asset)
     if (!check.ok) {
+      // a stale version beats "wrong status": the caller is looking at old data
+      if (check.reason.startsWith('cannot ') && version !== asset.version) {
+        //send res
+        return res.status(409).json({ message: 'asset was updated by someone else, please refresh' })
+      }
       //send res
       return res.status(check.reason.includes('authorized') ? 403 : 400).json({ message: check.reason })
     }
-    if (check.assigneeRequired && !assignedTo) {
+    if (check.assigneeRequired && (!assignedTo || typeof assignedTo !== 'string')) {
       //send res
       return res.status(400).json({ message: 'assignedTo is required' })
     }
-    if (typeof version === 'number' && version !== asset.version) {
+    if (note !== undefined && typeof note !== 'string') {
+      //send res
+      return res.status(400).json({ message: 'note must be text' })
+    }
+    if (version !== asset.version) {
       //send res
       return res.status(409).json({ message: 'asset was updated by someone else, please refresh' })
     }
@@ -286,21 +322,26 @@ assetApp.patch('/assets/:assetId/:action', verifyToken(...READ_ROLES), async (re
       }
     }
 
-    const from = asset.status
-    asset.status = check.to
-    asset.version += 1
-    asset.lifecycleHistory.push({ fromStatus: from, toStatus: check.to, by: req.user.id, note })
+    const set = { status: check.to }
+    const unset = {}
+    if (check.assigneeRequired) set.assignedTo = assignedTo
+    if (check.clearsAssignee) unset.assignedTo = ''
 
-    if (check.assigneeRequired) asset.assignedTo = assignedTo
-    if (check.clearsAssignee) asset.assignedTo = undefined
-
-    await asset.save()
+    const result = await atomicTransition({
+      Model: AssetModel, doc: asset, action, noun: 'asset', from: ASSET_TRANSITIONS[action].from, version,
+      set, unset,
+      push: { lifecycleHistory: { fromStatus: asset.status, toStatus: check.to, by: req.user.id, note, at: new Date() } },
+    })
+    if (result.error) {
+      //send res
+      return res.status(result.error.status).json({ message: result.error.message })
+    }
 
     if (action === 'assign') {
       await createNotification({ user: assignedTo, type: 'GENERAL', message: `Asset ${asset.publicId} (${asset.name}) was assigned to you`, link: '/my-assets' })
     }
 
     //send res
-    res.status(200).json({ message: `asset ${action} succeeded`, payload: asset })
+    res.status(200).json({ message: `asset ${action} succeeded`, payload: result.doc })
   } catch (err) { next(err) }
 })

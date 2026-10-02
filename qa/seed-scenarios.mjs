@@ -22,16 +22,18 @@ const { KnowledgeArticleModel } = await load(base + 'models/KnowledgeArticleMode
 const { seedIfEmpty, seedKnowledgeBaseIfEmpty } = await load(base + 'utils/seedData.js')
 
 const withId = (d) => ({ _id: new Types.ObjectId(), ...d })
-let users = [], cats = [], kb = [], assets = 0
-UserModel.countDocuments = async () => users.length
-UserModel.create = async (d) => { const u = withId(d); users.push(u); return u }
-UserModel.findOne = async (f) => users.find((u) => u.email === f.email) || null
-CategoryModel.insertMany = async (a) => { const r = a.map(withId); cats.push(...r); return r }
-CategoryModel.findOne = async (f) => cats.find((c) => c.name === f.name) || null
-for (const M of [DepartmentModel, SLAPolicyModel, VendorModel]) M.insertMany = async (a) => a.map(withId)
+// generic in-memory store: findOne matches every key of the filter, create stores
+const store = new Map()
+const rows = (M) => { if (!store.has(M)) store.set(M, []); return store.get(M) }
+const matches = (doc, f) => Object.entries(f).every(([k, v]) => String(doc[k]) === String(v))
+for (const M of [UserModel, DepartmentModel, CategoryModel, SLAPolicyModel, VendorModel, AssetModel]) {
+  M.findOne = async (f) => rows(M).find((d) => matches(d, f)) || null
+  M.create = async (d) => { const r = withId(d); rows(M).push(r); return r }
+  M.countDocuments = async () => rows(M).length
+}
 DepartmentModel.findByIdAndUpdate = async () => ({})
-AssetModel.countDocuments = async () => assets
-AssetModel.create = async (d) => { assets++; return d }
+let kb = []
+Object.defineProperty(globalThis, '__cats', { get: () => rows(CategoryModel), set: (v) => store.set(CategoryModel, v) })
 KnowledgeArticleModel.countDocuments = async () => kb.length
 const realCreate = async (d) => { await new KnowledgeArticleModel(d).validate(); kb.push(d); return d } // real schema validation
 KnowledgeArticleModel.create = realCreate
@@ -53,7 +55,7 @@ console.log('ok  A2 re-running the seed is idempotent')
 
 kb = []
 const outB = await quiet(seedIfEmpty)
-assert.equal(kb.length, 13, 'B: existing DB must be topped up'); assert.ok(outB.some((l) => /users already exist/.test(l)))
+assert.equal(kb.length, 13, 'B: existing DB must be topped up'); assert.ok(outB.some((l) => /ensuring seed data/.test(l)))
 console.log('ok  B an existing database (users present, KB empty) is topped up')
 
 const before = kb.length
@@ -61,16 +63,35 @@ await quiet(seedKnowledgeBaseIfEmpty)
 assert.equal(kb.length, before, 'C: no duplicates')
 console.log('ok  C repeated top-up never duplicates')
 
-kb = []; const net = cats.find((c) => c.name === 'Network'); cats = cats.filter((c) => c.name !== 'Network')
+kb = []; const net = __cats.find((c) => c.name === 'Network'); __cats = __cats.filter((c) => c.name !== 'Network')
 const outD = await quiet(seedKnowledgeBaseIfEmpty)
 assert.equal(kb.length, 0, 'D: nothing seeded'); assert.ok(outD.some((l) => /skipped/.test(l)))
 console.log('ok  D a missing category skips seeding gracefully instead of crashing')
 
-cats.push(net); kb = []
+__cats.push(net); kb = []
 KnowledgeArticleModel.create = async () => { throw new Error('simulated write failure') }
 let threw = false
 const outE = await quiet(async () => { try { await seedIfEmpty() } catch { threw = true } })
 assert.equal(threw, false, 'E: a KB seed failure must not escape seedIfEmpty'); assert.ok(outE.some((l) => /non-fatal/.test(l)))
 KnowledgeArticleModel.create = realCreate
 console.log('ok  E a KB write failure is logged and swallowed (server.js would otherwise retry then exit)')
+
+// F: re-running must not add ANY row to any collection
+const count = () => [UserModel, DepartmentModel, CategoryModel, SLAPolicyModel, VendorModel, AssetModel].map((M) => rows(M).length).join(',')
+await quiet(seedIfEmpty); const c1 = count(); await quiet(seedIfEmpty)
+assert.equal(count(), c1, 'F: second run adds nothing')
+assert.ok(rows(SLAPolicyModel).some((p) => p.priority === 'TEST' && p.level === 0), 'F: TEST priority ensured')
+console.log('ok  F the ensure-style seed adds nothing on a second run and keeps the TEST priority')
+
+// G: production gating - no demo accounts, admin only from SEED_ADMIN_PASSWORD
+store.clear(); kb = []; process.env.NODE_ENV = 'production'; delete process.env.SEED_ADMIN_PASSWORD
+const outG = await quiet(seedIfEmpty)
+assert.equal(rows(UserModel).length, 0, 'G: no users without SEED_ADMIN_PASSWORD'); assert.ok(outG.some((l) => /SEED_ADMIN_PASSWORD/.test(l)))
+process.env.SEED_ADMIN_PASSWORD = 'short'; await quiet(seedIfEmpty)
+assert.equal(rows(UserModel).length, 0, 'G: short password refused')
+process.env.SEED_ADMIN_PASSWORD = 'a-long-enough-pass'; await quiet(seedIfEmpty); await quiet(seedIfEmpty)
+assert.equal(rows(UserModel).length, 1, 'G: exactly one admin, created once'); assert.equal(rows(UserModel)[0].role, 'ADMIN')
+assert.notEqual(rows(UserModel)[0].password, 'a-long-enough-pass', 'G: stored hashed')
+assert.equal(rows(AssetModel).length, 0, 'G: no demo assets in production')
+console.log('ok  G production seeds no demo data; the admin comes only from SEED_ADMIN_PASSWORD (>=12 chars, hashed, once)')
 process.exit(0)

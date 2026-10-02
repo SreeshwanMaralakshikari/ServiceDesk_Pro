@@ -12,18 +12,28 @@ import { elapsedMs } from '../utils/businessHours.js'
 import { evaluateTicketSla, evaluateManyTicketsSla } from '../utils/evaluateSla.js'
 import { buildTicketQuery } from '../utils/buildTicketQuery.js'
 import { idOrPublicIdFilter } from '../utils/findByIdOrPublicId.js'
-import { isTransitionAllowed, REQUESTER_ONLY_ACTIONS, TEAM_SCOPED_ACTIONS, REOPEN_WINDOW_DAYS } from '../utils/ticketTransitions.js'
+import { atomicTransition, isValidVersion, VERSION_REQUIRED_MESSAGE } from '../utils/atomicTransition.js'
+import { getPagination, toPage } from '../utils/pagination.js'
+import { asText } from '../utils/queryParams.js'
+import { toTicketView, toTicketListItem } from '../utils/ticketView.js'
+import { TRANSITIONS, isTransitionAllowed, REQUESTER_ONLY_ACTIONS, TEAM_SCOPED_ACTIONS, REOPEN_WINDOW_DAYS } from '../utils/ticketTransitions.js'
 import { createNotification, notifyMany } from '../utils/createNotification.js'
 
 export const ticketApp = exp.Router()
 
 const ALL_ROLES = ['ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOYEE', 'ASSET_MANAGER']
 
+
 // staffing helper for the Manager/Admin assign & reassign UI — active
 // technicians in the caller's own team (Admin may pass ?department=)
 ticketApp.get('/team-technicians', verifyToken('MANAGER', 'ADMIN'), async (req, res, next) => {
   try {
-    const department = req.user.role === 'ADMIN' ? req.query.department : req.user.department
+    // a Manager without a team must see nobody, not every technician
+    if (req.user.role !== 'ADMIN' && !req.user.department) {
+      //send res
+      return res.status(200).json({ message: 'technicians fetched', payload: [] })
+    }
+    const department = req.user.role === 'ADMIN' ? asText(req.query.department) : req.user.department
     const filter = { role: 'TECHNICIAN', isActive: true }
     if (department) filter.department = department
     const technicians = await UserModel.find(filter).select('firstName lastName email department')
@@ -40,10 +50,14 @@ ticketApp.get('/team-technicians', verifyToken('MANAGER', 'ADMIN'), async (req, 
 ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, next) => {
   try {
     // destructure known fields only — never new Model(req.body)
-    const { title, description, categoryId, priority } = req.body
+    const { title, description, categoryId, priority } = req.body ?? {}
     if (!title || !description || !categoryId) {
       //send res
       return res.status(400).json({ message: 'title, description and categoryId are required' })
+    }
+    if (![title, description, categoryId].every((v) => typeof v === 'string')) {
+      //send res
+      return res.status(400).json({ message: 'title, description and categoryId must be text' })
     }
 
     const category = await CategoryModel.findOne({ _id: categoryId, isActive: true })
@@ -52,17 +66,29 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
       return res.status(400).json({ message: 'invalid category' })
     }
 
+    // the priority must be an active SLA policy; the level-0 TEST policy
+    // (1-3 minute SLA, for demos) is staff-only so an employee cannot use it
+    // to flood the managers with breach notifications
+    const requested = priority === undefined || priority === null || priority === '' ? category.defaultPriority : priority
+    if (typeof requested !== 'string') {
+      //send res
+      return res.status(400).json({ message: 'priority must be text' })
+    }
+    const policy = await SLAPolicyModel.findOne({ priority: requested.trim().toUpperCase(), isActive: true })
+    if (!policy || (policy.level <= 0 && req.user.role !== 'ADMIN')) {
+      //send res
+      return res.status(400).json({ message: 'invalid or inactive priority' })
+    }
+
     const requester = await UserModel.findById(req.user.id)
-    const finalPriority = priority || category.defaultPriority
     const publicId = await generateSequentialId(TicketModel, 'TKT')
     const needsApproval = Boolean(category.requiresApproval)
 
     let status = 'OPEN'
     let sla = {}
     if (!needsApproval) {
-      const policy = await SLAPolicyModel.findOne({ priority: finalPriority, isActive: true })
       const settings = await getOrgSettings()
-      sla = { ...startSlaClock(new Date(), policy, settings.businessHours), policy: policy?._id }
+      sla = { ...startSlaClock(new Date(), policy, settings.businessHours), policy: policy._id }
     } else {
       status = 'PENDING_APPROVAL'
     }
@@ -76,7 +102,7 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
       requesterDepartment: requester.department,
       department: category.department,
       category: category._id,
-      priority: finalPriority,
+      priority: policy.priority,
       status,
       sla,
       statusHistory: [{ to: status, by: requester._id, note: needsApproval ? 'ticket created — awaiting approval' : 'ticket created' }],
@@ -92,7 +118,7 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
     }
 
     //send res
-    res.status(201).json({ message: needsApproval ? 'ticket submitted for approval' : 'ticket created', payload: ticket })
+    res.status(201).json({ message: needsApproval ? 'ticket submitted for approval' : 'ticket created', payload: toTicketView(ticket, req.user) })
   } catch (err) {
     next(err)
   }
@@ -102,26 +128,24 @@ ticketApp.post('/tickets', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, ne
 // Manager/Admin "Approvals" inbox via ?status=PENDING_APPROVAL)
 ticketApp.get('/tickets', verifyToken(...ALL_ROLES), async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, status, priority, category, q } = req.query
+    const { status, priority, category, q } = req.query
     const query = buildTicketQuery(req.user, { status, priority, category, q })
+    const paging = getPagination(req.query)
 
-    const skip = (Number(page) - 1) * Number(limit)
     const [items, total] = await Promise.all([
       TicketModel.find(query)
+        .select('-comments') // lists never carry comments, internal or not
         .populate('requester', 'firstName lastName email')
         .populate('assignedTo', 'firstName lastName email')
         .populate('category', 'name ticketType')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(Number(limit)),
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(paging.skip)
+        .limit(paging.limit),
       TicketModel.countDocuments(query),
     ])
 
     //send res
-    res.status(200).json({
-      message: 'tickets fetched',
-      payload: { items, total, page: Number(page), totalPages: Math.ceil(total / limit) },
-    })
+    res.status(200).json({ message: 'tickets fetched', payload: toPage(items.map(toTicketListItem), total, paging) })
 
     // lazy SLA check — fire after responding so it never adds latency to
     // the request; Render's free tier sleeps, so this (plus the cron) is
@@ -147,17 +171,12 @@ ticketApp.get('/tickets/:ticketId', verifyToken(...ALL_ROLES), async (req, res, 
       return res.status(404).json({ message: 'ticket not found' })
     }
 
-    // hide internal comments from anyone who isn't staff on the owning team or Admin
-    const isStaff = req.user.role === 'ADMIN' || ((req.user.role === 'TECHNICIAN' || req.user.role === 'MANAGER') && req.user.department === ticket.department.toString())
-    const visible = ticket.toObject()
-    if (!isStaff) visible.comments = visible.comments.filter((c) => !c.isInternal)
-
     // lazy SLA check — a single ticket is cheap enough to await before
     // responding, so the badge the caller sees is already up to date
     await evaluateTicketSla(ticket).catch((err) => console.log('lazy SLA check (detail) failed:', err.message))
 
     //send res
-    res.status(200).json({ message: 'ticket fetched', payload: visible })
+    res.status(200).json({ message: 'ticket fetched', payload: toTicketView(ticket, req.user) })
   } catch (err) {
     next(err)
   }
@@ -170,10 +189,11 @@ ticketApp.get('/tickets/:ticketId', verifyToken(...ALL_ROLES), async (req, res, 
 // would match /tickets/:id/priority as :action="priority" and reject it
 // as an unknown transition.
 const CLOSED_STATUSES = ['RESOLVED', 'CLOSED', 'CANCELLED', 'REJECTED']
+const PRIORITY_EDITABLE_STATUSES = ['PENDING_APPROVAL', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REOPENED']
 ticketApp.patch('/tickets/:ticketId/priority', verifyToken('MANAGER', 'ADMIN'), async (req, res, next) => {
   try {
-    const { priority, version } = req.body
-    if (!priority) {
+    const { priority, version } = req.body ?? {}
+    if (typeof priority !== 'string' || !priority.trim()) {
       //send res
       return res.status(400).json({ message: 'priority is required' })
     }
@@ -186,38 +206,47 @@ ticketApp.patch('/tickets/:ticketId/priority', verifyToken('MANAGER', 'ADMIN'), 
       //send res
       return res.status(403).json({ message: 'this ticket belongs to a different team' })
     }
+    if (!isValidVersion(version)) {
+      //send res
+      return res.status(400).json({ message: VERSION_REQUIRED_MESSAGE })
+    }
+    if (version !== ticket.version) {
+      //send res
+      return res.status(409).json({ message: 'ticket was updated by someone else, please refresh' })
+    }
     if (CLOSED_STATUSES.includes(ticket.status)) {
       //send res
       return res.status(400).json({ message: `cannot change priority on a ${ticket.status} ticket` })
     }
-    if (typeof version === 'number' && version !== ticket.version) {
-      //send res
-      return res.status(409).json({ message: 'ticket was updated by someone else, please refresh' })
-    }
 
-    const newPolicy = await SLAPolicyModel.findOne({ priority, isActive: true })
+    const newPolicy = await SLAPolicyModel.findOne({ priority: priority.trim().toUpperCase(), isActive: true })
     if (!newPolicy) {
       //send res
       return res.status(400).json({ message: 'invalid or inactive priority' })
     }
 
     const previousPriority = ticket.priority
-    ticket.priority = priority
-    ticket.version += 1
-    ticket.statusHistory.push({ from: ticket.status, to: ticket.status, by: req.user.id, note: `priority changed ${previousPriority} → ${priority}` })
-
+    const set = { priority: newPolicy.priority }
     if (ticket.status === 'PENDING_APPROVAL') {
       // no SLA clock yet — just the field change, per the handoff plan
-      ticket.sla.policy = newPolicy._id
+      set['sla.policy'] = newPolicy._id
     } else {
       const settings = await getOrgSettings()
       const patch = recomputeSlaForPriorityChange(ticket.sla, newPolicy, settings.businessHours)
-      Object.assign(ticket.sla, patch)
+      for (const [key, value] of Object.entries(patch)) set[`sla.${key}`] = value
     }
 
-    await ticket.save()
+    const result = await atomicTransition({
+      Model: TicketModel, doc: ticket, action: 'change priority on', noun: 'ticket', from: PRIORITY_EDITABLE_STATUSES, version,
+      set,
+      push: { statusHistory: { from: ticket.status, to: ticket.status, by: req.user.id, note: `priority changed ${previousPriority} → ${newPolicy.priority}`, at: new Date() } },
+    })
+    if (result.error) {
+      //send res
+      return res.status(result.error.status).json({ message: result.error.message })
+    }
     //send res
-    res.status(200).json({ message: 'priority updated', payload: ticket })
+    res.status(200).json({ message: 'priority updated', payload: toTicketView(result.doc, req.user) })
   } catch (err) {
     next(err)
   }
@@ -225,11 +254,12 @@ ticketApp.patch('/tickets/:ticketId/priority', verifyToken('MANAGER', 'ADMIN'), 
 
 // link/change the asset this ticket is about — Employees may only pick
 // one of their own assigned assets; staff (assigned tech, team Manager,
-// Admin) can link any asset. No status change. Registered before the
+// Admin) can link any asset. No status change, so no version bump (a partial
+// $set cannot overwrite anyone else's edit). Registered before the
 // wildcard :action route below for the same reason as /priority.
 ticketApp.patch('/tickets/:ticketId/related-asset', verifyToken(...ALL_ROLES), async (req, res, next) => {
   try {
-    const { assetId } = req.body // null/omitted clears the link
+    const { assetId } = req.body ?? {} // null/omitted clears the link
     const ticket = await TicketModel.findOne({ ...idOrPublicIdFilter(req.params.ticketId), isDeleted: false })
     if (!ticket) {
       //send res
@@ -249,7 +279,11 @@ ticketApp.patch('/tickets/:ticketId/related-asset', verifyToken(...ALL_ROLES), a
       ticket.relatedAsset = undefined
       await ticket.save()
       //send res
-      return res.status(200).json({ message: 'related asset cleared', payload: ticket })
+      return res.status(200).json({ message: 'related asset cleared', payload: toTicketView(ticket, req.user) })
+    }
+    if (typeof assetId !== 'string') {
+      //send res
+      return res.status(400).json({ message: 'assetId must be text' })
     }
 
     const asset = await AssetModel.findOne({ ...idOrPublicIdFilter(assetId), isDeleted: false })
@@ -266,7 +300,7 @@ ticketApp.patch('/tickets/:ticketId/related-asset', verifyToken(...ALL_ROLES), a
     ticket.relatedAsset = asset._id
     await ticket.save()
     //send res
-    res.status(200).json({ message: 'related asset linked', payload: ticket })
+    res.status(200).json({ message: 'related asset linked', payload: toTicketView(ticket, req.user) })
   } catch (err) {
     next(err)
   }
@@ -274,20 +308,35 @@ ticketApp.patch('/tickets/:ticketId/related-asset', verifyToken(...ALL_ROLES), a
 
 // status transitions — approve / reject / cancel / assign / claim / reassign
 // / start / hold / resume / resolve / confirm / reopen (full Section 6b
-// matrix, minus linked-ticket/duplicate closing and watchers — Phase 6)
+// matrix, minus linked-ticket/duplicate closing and watchers — COLLAB-EXTRAS).
+// Authorisation and input checks run on a pre-read; the write itself is one
+// atomic findOneAndUpdate guarded on status + version (utils/atomicTransition.js).
 ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (req, res, next) => {
   try {
     const { ticketId, action } = req.params
-    const { note, resolutionSummary, technicianId, version } = req.body
+    const { note, resolutionSummary, technicianId, version } = req.body ?? {}
 
     const ticket = await TicketModel.findOne({ ...idOrPublicIdFilter(ticketId), isDeleted: false })
     if (!ticket) {
       //send res
       return res.status(404).json({ message: 'ticket not found' })
     }
+    if (!isValidVersion(version)) {
+      //send res
+      return res.status(400).json({ message: VERSION_REQUIRED_MESSAGE })
+    }
+    if (note !== undefined && typeof note !== 'string') {
+      //send res
+      return res.status(400).json({ message: 'note must be text' })
+    }
 
     const check = isTransitionAllowed(action, ticket.status, req.user.role)
     if (!check.ok) {
+      // a stale version beats "wrong status": the caller is looking at old data
+      if (check.reason.startsWith('cannot ') && version !== ticket.version) {
+        //send res
+        return res.status(409).json({ message: 'ticket was updated by someone else, please refresh' })
+      }
       //send res
       return res.status(check.reason.includes('authorized') ? 403 : 400).json({ message: check.reason })
     }
@@ -303,7 +352,7 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       }
     }
 
-    if (check.requiresNote && !note) {
+    if (check.requiresNote && !note?.trim()) {
       //send res
       return res.status(400).json({ message: `a note is required for ${action}` })
     }
@@ -324,39 +373,44 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       return res.status(403).json({ message: 'only the assigned technician can do this' })
     }
 
-    if (typeof version === 'number' && version !== ticket.version) {
+    if (version !== ticket.version) {
       //send res
       return res.status(409).json({ message: 'ticket was updated by someone else, please refresh' })
     }
 
+    // everything below only builds the update; nothing is written until the
+    // single atomic call at the end
     const from = ticket.status
-    if (check.to !== null) ticket.status = check.to
-    ticket.version += 1
-    ticket.statusHistory.push({ from, to: check.to ?? from, by: req.user.id, note })
+    const now = new Date()
+    const set = {}
+    const unset = {}
+    const notifications = []
+    if (check.to !== null) set.status = check.to
 
     if (action === 'approve') {
       const policy = await SLAPolicyModel.findOne({ priority: ticket.priority, isActive: true })
       const settings = await getOrgSettings()
-      const clock = startSlaClock(new Date(), policy, settings.businessHours)
-      ticket.sla = { ...ticket.sla.toObject?.() ?? ticket.sla, ...clock, policy: policy?._id }
-      ticket.approval.approvedBy = req.user.id
-      ticket.approval.approvedAt = new Date()
-      await createNotification({ user: ticket.requester, type: 'TICKET_APPROVED', message: `Ticket ${ticket.publicId} was approved and is now open`, link: `/tickets/${ticket.publicId}` })
+      const clock = startSlaClock(now, policy, settings.businessHours)
+      for (const [key, value] of Object.entries(clock)) set[`sla.${key}`] = value
+      if (policy) set['sla.policy'] = policy._id
+      set['approval.approvedBy'] = req.user.id
+      set['approval.approvedAt'] = now
+      notifications.push({ user: ticket.requester, type: 'TICKET_APPROVED', message: `Ticket ${ticket.publicId} was approved and is now open` })
     }
     if (action === 'reject') {
-      ticket.approval.rejectedBy = req.user.id
-      ticket.approval.rejectedAt = new Date()
-      ticket.approval.rejectionReason = note
-      await createNotification({ user: ticket.requester, type: 'TICKET_REJECTED', message: `Ticket ${ticket.publicId} was rejected: ${note}`, link: `/tickets/${ticket.publicId}` })
+      set['approval.rejectedBy'] = req.user.id
+      set['approval.rejectedAt'] = now
+      set['approval.rejectionReason'] = note
+      notifications.push({ user: ticket.requester, type: 'TICKET_REJECTED', message: `Ticket ${ticket.publicId} was rejected: ${note}` })
     }
     if (action === 'cancel') {
-      ticket.cancellation = { cancelledBy: req.user.id, cancelledAt: new Date(), reason: note }
+      set.cancellation = { cancelledBy: req.user.id, cancelledAt: now, reason: note }
       if (ticket.assignedTo) {
-        await createNotification({ user: ticket.assignedTo, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was cancelled`, link: `/tickets/${ticket.publicId}` })
+        notifications.push({ user: ticket.assignedTo, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was cancelled` })
       }
     }
     if (action === 'assign' || action === 'reassign') {
-      if (!technicianId) {
+      if (!technicianId || typeof technicianId !== 'string') {
         //send res
         return res.status(400).json({ message: 'technicianId is required' })
       }
@@ -365,50 +419,54 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
         //send res
         return res.status(400).json({ message: 'technicianId must be an active technician' })
       }
-      if (req.user.role !== 'ADMIN' && technician.department?.toString() !== ticket.department.toString()) {
+      // no Admin bypass: the assignee must be in the ticket's own team
+      if (technician.department?.toString() !== ticket.department.toString()) {
         //send res
         return res.status(400).json({ message: "technician must belong to the ticket's department" })
       }
       const previousAssignee = ticket.assignedTo
-      ticket.assignedTo = technician._id
-      ticket.assignedBy = req.user.id
-      ticket.assignedAt = new Date()
-      await createNotification({ user: technician._id, type: 'TICKET_ASSIGNED', message: `Ticket ${ticket.publicId} was assigned to you`, link: `/tickets/${ticket.publicId}` })
-      if (action === 'reassign' && previousAssignee && previousAssignee.toString() !== technicianId) {
-        await createNotification({ user: previousAssignee, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was reassigned to someone else`, link: `/tickets/${ticket.publicId}` })
+      set.assignedTo = technician._id
+      set.assignedBy = req.user.id
+      set.assignedAt = now
+      notifications.push({ user: technician._id, type: 'TICKET_ASSIGNED', message: `Ticket ${ticket.publicId} was assigned to you` })
+      if (action === 'reassign' && previousAssignee && previousAssignee.toString() !== technician._id.toString()) {
+        notifications.push({ user: previousAssignee, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was reassigned to someone else` })
       }
     }
     if (action === 'claim') {
-      ticket.assignedTo = req.user.id
-      ticket.assignedBy = req.user.id
-      ticket.assignedAt = new Date()
+      set.assignedTo = req.user.id
+      set.assignedBy = req.user.id
+      set.assignedAt = now
     }
     if (action === 'start' && !ticket.sla.firstRespondedAt) {
-      ticket.sla.firstRespondedAt = new Date()
+      set['sla.firstRespondedAt'] = now
     }
     if (action === 'hold') {
-      ticket.sla.pausedAt = new Date()
+      set['sla.pausedAt'] = now
     }
     if (action === 'resume' && ticket.sla.pausedAt) {
       const policy = ticket.sla.policy ? await SLAPolicyModel.findById(ticket.sla.policy) : null
       const settings = await getOrgSettings()
-      const pausedMs = elapsedMs(ticket.sla.pausedAt, new Date(), policy, settings.businessHours)
-      if (ticket.sla.responseDueAt) ticket.sla.responseDueAt = new Date(ticket.sla.responseDueAt.getTime() + pausedMs)
-      if (ticket.sla.resolutionDueAt) ticket.sla.resolutionDueAt = new Date(ticket.sla.resolutionDueAt.getTime() + pausedMs)
-      if (ticket.sla.warnAt) ticket.sla.warnAt = new Date(ticket.sla.warnAt.getTime() + pausedMs)
-      ticket.sla.totalPausedMs = (ticket.sla.totalPausedMs || 0) + pausedMs
-      ticket.sla.pausedAt = undefined
+      const pausedMs = elapsedMs(ticket.sla.pausedAt, now, policy, settings.businessHours)
+      if (ticket.sla.responseDueAt) set['sla.responseDueAt'] = new Date(ticket.sla.responseDueAt.getTime() + pausedMs)
+      if (ticket.sla.resolutionDueAt) set['sla.resolutionDueAt'] = new Date(ticket.sla.resolutionDueAt.getTime() + pausedMs)
+      if (ticket.sla.warnAt) set['sla.warnAt'] = new Date(ticket.sla.warnAt.getTime() + pausedMs)
+      set['sla.totalPausedMs'] = (ticket.sla.totalPausedMs || 0) + pausedMs
+      unset['sla.pausedAt'] = ''
     }
     if (action === 'resolve') {
-      if (!resolutionSummary) { return res.status(400).json({ message: 'resolutionSummary is required' }) }
-      ticket.resolution.summary = resolutionSummary
-      ticket.resolution.resolvedBy = req.user.id
-      ticket.resolution.resolvedAt = new Date()
-      await createNotification({ user: ticket.requester, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was marked resolved — please confirm`, link: `/tickets/${ticket.publicId}` })
+      if (typeof resolutionSummary !== 'string' || !resolutionSummary.trim()) {
+        //send res
+        return res.status(400).json({ message: 'resolutionSummary is required' })
+      }
+      set['resolution.summary'] = resolutionSummary
+      set['resolution.resolvedBy'] = req.user.id
+      set['resolution.resolvedAt'] = now
+      notifications.push({ user: ticket.requester, type: 'STATUS_CHANGED', message: `Ticket ${ticket.publicId} was marked resolved — please confirm` })
     }
     if (action === 'confirm') {
-      ticket.resolution.confirmedByRequester = true
-      ticket.resolution.confirmedAt = new Date()
+      set['resolution.confirmedByRequester'] = true
+      set['resolution.confirmedAt'] = now
     }
     if (action === 'reopen') {
       // new SLA cycle from now — response SLA isn't re-run (first response
@@ -416,26 +474,41 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       // from the cycle that just ended is banked into pastBreaches
       const policy = await SLAPolicyModel.findOne({ priority: ticket.priority, isActive: true })
       const settings = await getOrgSettings()
-      const now = new Date()
       const clock = startSlaClock(now, policy, settings.businessHours)
-      ticket.reopenCount = (ticket.reopenCount || 0) + 1
-      ticket.sla.pastBreaches = (ticket.sla.pastBreaches || 0) + (ticket.sla.resolutionBreached ? 1 : 0)
-      ticket.sla.startedAt = now
-      ticket.sla.resolutionDueAt = clock.resolutionDueAt
-      ticket.sla.warnAt = clock.warnAt
-      ticket.sla.resolutionBreached = false
-      ticket.sla.warningSent = false
-      ticket.sla.escalationLevel = ticket.sla.responseBreached ? 1 : 0 // responseBreached isn't touched by reopen, so don't clobber it
-      ticket.sla.totalPausedMs = 0
-      ticket.resolution = { summary: undefined, resolvedBy: undefined, resolvedAt: undefined, confirmedByRequester: false, confirmedAt: undefined }
+      set.reopenCount = (ticket.reopenCount || 0) + 1
+      set['sla.pastBreaches'] = (ticket.sla.pastBreaches || 0) + (ticket.sla.resolutionBreached ? 1 : 0)
+      set['sla.startedAt'] = now
+      set['sla.resolutionDueAt'] = clock.resolutionDueAt
+      set['sla.warnAt'] = clock.warnAt
+      set['sla.resolutionBreached'] = false
+      set['sla.warningSent'] = false
+      set['sla.escalationLevel'] = ticket.sla.responseBreached ? 1 : 0 // responseBreached isn't touched by reopen, so don't clobber it
+      set['sla.totalPausedMs'] = 0
+      set['resolution.confirmedByRequester'] = false
+      unset['resolution.summary'] = ''
+      unset['resolution.resolvedBy'] = ''
+      unset['resolution.resolvedAt'] = ''
+      unset['resolution.confirmedAt'] = ''
       if (ticket.assignedTo) {
-        await createNotification({ user: ticket.assignedTo, type: 'TICKET_REOPENED', message: `Ticket ${ticket.publicId} was reopened: ${note}`, link: `/tickets/${ticket.publicId}` })
+        notifications.push({ user: ticket.assignedTo, type: 'TICKET_REOPENED', message: `Ticket ${ticket.publicId} was reopened: ${note}` })
       }
     }
 
-    await ticket.save()
+    const result = await atomicTransition({
+      Model: TicketModel, doc: ticket, action, noun: 'ticket', from: TRANSITIONS[action].from, version,
+      set, unset,
+      push: { statusHistory: { from, to: check.to ?? from, by: req.user.id, note, at: now } },
+    })
+    if (result.error) {
+      //send res
+      return res.status(result.error.status).json({ message: result.error.message })
+    }
+
+    // notifications follow the main write; a failure is logged inside createNotification, never fatal
+    await Promise.all(notifications.map((n) => createNotification({ ...n, link: `/tickets/${ticket.publicId}` })))
+
     //send res
-    res.status(200).json({ message: `ticket ${action} succeeded`, payload: ticket })
+    res.status(200).json({ message: `ticket ${action} succeeded`, payload: toTicketView(result.doc, req.user) })
   } catch (err) {
     next(err)
   }
@@ -444,8 +517,8 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
 // comments
 ticketApp.post('/tickets/:ticketId/comments', verifyToken(...ALL_ROLES), async (req, res, next) => {
   try {
-    const { text, isInternal } = req.body
-    if (!text) {
+    const { text, isInternal } = req.body ?? {}
+    if (typeof text !== 'string' || !text.trim()) {
       //send res
       return res.status(400).json({ message: 'comment text is required' })
     }

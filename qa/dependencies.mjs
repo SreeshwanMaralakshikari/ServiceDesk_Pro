@@ -14,8 +14,8 @@ for(const [label,root,src] of [['backend',(ROOT+'/backend'),['.']],['frontend',(
   src.forEach(s=>walk(path.join(root,s)))
   const used=new Map()
   for(const f of files){ const t=fs.readFileSync(f,'utf8')
-    for(const m of t.matchAll(/(?:^|\n)\s*import[^'"\n]*?from\s*['"]([^'"]+)['"]|(?:^|\n)\s*import\s*['"]([^'"]+)['"]/g)){
-      const spec=m[1]||m[2]; if(spec.startsWith('.')||spec.startsWith('/')||spec.startsWith('node:')||spec.startsWith('@/')) continue
+    for(const m of t.matchAll(/(?:^|\n)\s*import[^'"\n]*?from\s*['"]([^'"]+)['"]|(?:^|\n)\s*import\s*['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g)){
+      const spec=m[1]||m[2]||m[3]; if(spec.startsWith('.')||spec.startsWith('/')||spec.startsWith('node:')||spec.startsWith('@/')) continue
       const name=spec.startsWith('@')?spec.split('/').slice(0,2).join('/'):spec.split('/')[0]
       if(builtinModules.includes(name)) continue; if(!used.has(name)) used.set(name,path.relative(root,f)) } }
   console.log(`== ${label}: ${used.size} third-party packages imported by source`)

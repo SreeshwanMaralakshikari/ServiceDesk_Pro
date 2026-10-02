@@ -1,25 +1,10 @@
-import exp from 'express'
-import { config } from 'dotenv'
+import './config/loadEnv.js'
 import { connect } from 'mongoose'
-import cookieParser from 'cookie-parser'
-import cors from 'cors'
-import helmet from 'helmet'
 
-import { commonApp } from './APIs/CommonAPI.js'
-import { metaApp } from './APIs/MetaAPI.js'
-import { ticketApp } from './APIs/TicketAPI.js'
-import { adminApp } from './APIs/AdminAPI.js'
-import { notificationApp } from './APIs/NotificationAPI.js'
-import { assetApp } from './APIs/AssetAPI.js'
-import { vendorApp } from './APIs/VendorAPI.js'
-import { kbApp } from './APIs/KnowledgeBaseAPI.js'
-import { aiApp } from './APIs/AiAPI.js'
+import { app } from './app.js'
 import { seedIfEmpty } from './utils/seedData.js'
-import { sanitizeBody } from './middlewares/sanitize.js'
 import { startSlaChecker } from './jobs/slaChecker.js'
-import { startWarrantyChecker } from './jobs/warrantyChecker.js'
-
-config()
+import { startWarrantyChecker, runWarrantyCheck } from './jobs/warrantyChecker.js'
 
 // fail fast if required env vars are missing
 const required = ['MONGO_URI', 'JWT_SECRET', 'CLIENT_URL']
@@ -30,33 +15,18 @@ for (const key of required) {
   }
 }
 
-const app = exp()
+// a URI with nothing after the host list silently uses the default "test"
+// database; warn instead of exiting so a deployment that still runs that way
+// keeps booting (the move to a named database happens in DEPLOY)
+const hasDbName = (uri) => {
+  const afterHosts = uri.replace(/^mongodb(\+srv)?:\/\//, '').split('?')[0]
+  return /\/[^/]+$/.test(afterHosts)
+}
+if (!hasDbName(process.env.MONGO_URI)) {
+  console.log('WARNING: MONGO_URI has no database name, so MongoDB uses the default "test" database. Use .../servicedeskpro_dev locally and .../servicedeskpro_prod on Render.')
+}
 
-app.set('trust proxy', 1)
-app.use(helmet())
-app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', process.env.CLIENT_URL],
-  credentials: true,
-}))
-app.use(exp.json({ limit: '1mb' }))
-app.use(cookieParser())
-app.use(sanitizeBody)
-
-// health check for deployment platforms
-app.get('/health', (req, res) => {
-  //send res
-  res.status(200).json({ message: 'ok', payload: { uptime: process.uptime() } })
-})
-
-app.use('/auth', commonApp)
-app.use('/meta-api', metaApp)
-app.use('/ticket-api', ticketApp)
-app.use('/admin-api', adminApp)
-app.use('/notification-api', notificationApp)
-app.use('/asset-api', assetApp)
-app.use('/vendor-api', vendorApp)
-app.use('/kb-api', kbApp)
-app.use('/ai-api', aiApp)
+let listening = false
 
 const connectDB = async (attempt = 1) => {
   const maxAttempts = 8
@@ -65,13 +35,27 @@ const connectDB = async (attempt = 1) => {
     await connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 10000 })
     console.log('DB connected')
     console.log(process.env.GROQ_API_KEY ? 'AI classification: enabled (GROQ_API_KEY set)' : 'AI classification: no GROQ_API_KEY set — classify-ticket will use the offline fallback')
+
+    // never auto-seed production: demo accounts there come from `npm run seed`
     if (process.env.SEED_ON_START === 'true') {
-      await seedIfEmpty()
+      if (process.env.NODE_ENV === 'production') {
+        console.log('SEED_ON_START is ignored when NODE_ENV=production — run `npm run seed` once instead')
+      } else {
+        await seedIfEmpty()
+      }
     }
-    const port = process.env.PORT || 5000
-    app.listen(port, () => console.log(`server listening on ${port}...`))
-    startSlaChecker() // only after the DB connection is confirmed live
-    startWarrantyChecker()
+
+    // listen only once, even if a later step throws and the retry loop runs again
+    if (!listening) {
+      const port = process.env.PORT || 5000
+      app.listen(port, () => console.log(`server listening on ${port}...`))
+      listening = true
+    }
+    await startSlaChecker() // only after the DB connection is confirmed live; awaited so a problem here can't become an unhandled rejection
+    await startWarrantyChecker()
+    // the warranty cron only fires at 09:00 server time and Render's free tier
+    // sleeps, so also run it once per boot (idempotent via warrantyNotified)
+    runWarrantyCheck().catch((err) => console.log('warranty check at startup failed (non-fatal):', err.message))
   } catch (err) {
     console.log(`err in db connect (attempt ${attempt}/${maxAttempts}):`, err.message)
     if (attempt >= maxAttempts) {
@@ -83,49 +67,3 @@ const connectDB = async (attempt = 1) => {
   }
 }
 connectDB()
-
-// invalid path handler
-app.use((req, res) => {
-  //send res
-  res.status(404).json({ message: `Path ${req.url} is invalid` })
-})
-
-// global error handler
-app.use((err, req, res, next) => {
-  console.log('Error name:', err.name)
-  console.log('Full error:', err.message)
-
-  if (err.name === 'ValidationError') {
-    //send res
-    return res.status(400).json({ message: 'error occurred', error: err.message })
-  }
-  if (err.name === 'CastError') {
-    //send res
-    return res.status(400).json({ message: 'error occurred', error: 'invalid id' })
-  }
-
-  // body-parser errors: bad JSON / too-large body are client mistakes, not server faults
-  if (err.type === 'entity.parse.failed') {
-    //send res
-    return res.status(400).json({ message: 'error occurred', error: 'invalid JSON body' })
-  }
-  if (err.type === 'entity.too.large') {
-    //send res
-    return res.status(413).json({ message: 'error occurred', error: 'request body too large' })
-  }
-
-  const errCode = err.code ?? err.cause?.code
-  const keyValue = err.keyValue ?? err.cause?.keyValue
-  if (errCode === 11000) {
-    if (keyValue) {
-      const field = Object.keys(keyValue)[0]
-      //send res
-      return res.status(409).json({ message: 'error occurred', error: `${field} "${keyValue[field]}" already exists` })
-    }
-    //send res
-    return res.status(409).json({ message: 'error occurred', error: 'duplicate key error' })
-  }
-
-  //send res
-  res.status(500).json({ message: 'error occurred', error: 'server side error' })
-})

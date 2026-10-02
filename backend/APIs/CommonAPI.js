@@ -1,13 +1,12 @@
 import exp from 'express'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import rateLimit from 'express-rate-limit'
 import { UserModel } from '../models/UserModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
+import { loginLimiter, registerLimiter } from '../middlewares/rateLimiters.js'
+import { validateRoleDepartment } from '../utils/validateRoleDepartment.js'
 
 export const commonApp = exp.Router()
-
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false })
 
 const cookieOptions = () => ({
   httpOnly: true,
@@ -17,12 +16,22 @@ const cookieOptions = () => ({
 })
 
 // self-register: always EMPLOYEE, role/department never trusted from elsewhere
-commonApp.post('/users', async (req, res, next) => {
+commonApp.post('/users', registerLimiter, async (req, res, next) => {
   try {
-    const { firstName, lastName, email, password, department } = req.body
+    const { firstName, lastName, email, password, department } = req.body ?? {}
     if (!firstName || !email || !password || !department) {
       //send res
       return res.status(400).json({ message: 'firstName, email, password and department are required' })
+    }
+    if (![firstName, email, password, department].every((v) => typeof v === 'string') || (lastName !== undefined && typeof lastName !== 'string')) {
+      //send res
+      return res.status(400).json({ message: 'firstName, lastName, email, password and department must be text' })
+    }
+    // self-registration is always EMPLOYEE, so the department must be a BUSINESS one
+    const deptError = await validateRoleDepartment('EMPLOYEE', department)
+    if (deptError) {
+      //send res
+      return res.status(400).json({ message: deptError })
     }
     const hashed = await bcrypt.hash(password, 10)
     const user = await UserModel.create({ firstName, lastName, email, password: hashed, role: 'EMPLOYEE', department })
@@ -35,10 +44,19 @@ commonApp.post('/users', async (req, res, next) => {
 
 commonApp.post('/login', loginLimiter, async (req, res, next) => {
   try {
-    const { email, password } = req.body
+    const { email, password } = req.body ?? {}
     if (!email || !password) {
       //send res
       return res.status(400).json({ message: 'email and password are required' })
+    }
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      //send res
+      return res.status(400).json({ message: 'email and password must be text' })
+    }
+    // temporary diagnostic for F-036: set LOG_CLIENT_IP=true on Render, log in once, read the
+    // Render log to pick TRUST_PROXY_HOPS, then remove the variable
+    if (process.env.LOG_CLIENT_IP === 'true') {
+      console.log('login ip debug:', { ip: req.ip, ips: req.ips, xForwardedFor: req.headers['x-forwarded-for'] })
     }
     const user = await UserModel.findOne({ email: email.toLowerCase() }).select('+password')
     if (!user || !user.isActive) {
@@ -83,7 +101,11 @@ commonApp.get('/check-auth', verifyToken('ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPL
 
 commonApp.put('/password', verifyToken('ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOYEE', 'ASSET_MANAGER'), async (req, res, next) => {
   try {
-    const { currentPassword, newPassword } = req.body
+    const { currentPassword, newPassword } = req.body ?? {}
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || !newPassword) {
+      //send res
+      return res.status(400).json({ message: 'currentPassword and newPassword are required' })
+    }
     const user = await UserModel.findById(req.user.id).select('+password')
     const match = await bcrypt.compare(currentPassword, user.password)
     if (!match) {

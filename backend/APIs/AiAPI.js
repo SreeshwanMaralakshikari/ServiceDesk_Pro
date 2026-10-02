@@ -5,6 +5,7 @@ import { TicketModel } from '../models/TicketModel.js'
 import { KnowledgeArticleModel } from '../models/KnowledgeArticleModel.js'
 import { AiLogModel } from '../models/AiLogModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
+import { aiLimiter } from '../middlewares/rateLimiters.js'
 import { idOrPublicIdFilter } from '../utils/findByIdOrPublicId.js'
 import { buildTicketQuery } from '../utils/buildTicketQuery.js'
 import { buildKbQuery } from '../utils/buildKbQuery.js'
@@ -26,7 +27,7 @@ const logAttempt = (fields) => AiLogModel.create(fields).catch((err) => console.
 // POST /ai-api/classify-ticket — same roles as ticket creation (EMPLOYEE,
 // ADMIN), called from the create-ticket form BEFORE the ticket exists, so
 // there is no ticket id yet and this never touches TicketModel.
-aiApp.post('/classify-ticket', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res, next) => {
+aiApp.post('/classify-ticket', verifyToken('EMPLOYEE', 'ADMIN'), aiLimiter, async (req, res, next) => {
   const start = Date.now()
   try {
     const { title, description } = req.body ?? {}
@@ -113,10 +114,11 @@ aiApp.post('/classify-ticket', verifyToken('EMPLOYEE', 'ADMIN'), async (req, res
 })
 
 // GET /ai-api/kb-suggestions/:ticketId — technician-facing. Retrieval only,
-// no LLM round trip: a relevance search over already-published KB content is
-// faster, free and — by going through buildKbQuery, exactly like browsing
-// the KB directly — automatically limited to articles this role may see.
-aiApp.get('/kb-suggestions/:ticketId', verifyToken('TECHNICIAN', 'MANAGER', 'ADMIN'), async (req, res, next) => {
+// no LLM round trip: a relevance search over PUBLISHED KB content only —
+// drafts and archived articles are never suggested, whatever the caller's role
+// (buildKbQuery would otherwise show Managers/Admins everything and
+// Technicians their own drafts).
+aiApp.get('/kb-suggestions/:ticketId', verifyToken('TECHNICIAN', 'MANAGER', 'ADMIN'), aiLimiter, async (req, res, next) => {
   try {
     // same visibility rule as GET /ticket-api/tickets/:ticketId — a
     // Technician can only pull suggestions for a ticket they could open
@@ -127,13 +129,14 @@ aiApp.get('/kb-suggestions/:ticketId', verifyToken('TECHNICIAN', 'MANAGER', 'ADM
     }
 
     const fields = 'publicId title summary category viewCount status'
-    let articles = await KnowledgeArticleModel.find(buildKbQuery(req.user, { category: ticket.category?.toString(), q: ticket.title }))
+    const publishedOnly = (filters) => ({ ...buildKbQuery(req.user, filters), status: 'PUBLISHED' })
+    let articles = await KnowledgeArticleModel.find(publishedOnly({ category: ticket.category?.toString(), q: ticket.title }))
       .select(fields).sort({ viewCount: -1, _id: -1 }).limit(5) // _id tiebreak: same determinism rule Phase 5 applied to the KB list route
     let matchedBy = 'text+category'
     if (articles.length === 0) {
       // no text hit — fall back to just the category, ranked by popularity,
       // so the panel still shows something rather than coming up empty
-      articles = await KnowledgeArticleModel.find(buildKbQuery(req.user, { category: ticket.category?.toString() }))
+      articles = await KnowledgeArticleModel.find(publishedOnly({ category: ticket.category?.toString() }))
         .select(fields).sort({ viewCount: -1, _id: -1 }).limit(5)
       matchedBy = 'category'
     }

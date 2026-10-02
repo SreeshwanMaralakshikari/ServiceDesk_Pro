@@ -27,3 +27,31 @@ GET {{baseUrl}}/auth/check-auth
 
 ### logout
 GET {{baseUrl}}/auth/logout
+
+### register is rate limited: more than 10/hour per IP -> 429
+### register needs a BUSINESS department (an IT_SUPPORT department id -> 400)
+POST {{baseUrl}}/auth/users
+Content-Type: application/json
+
+{
+  "firstName": "Bad",
+  "lastName": "Dept",
+  "email": "baddept@sdp.test",
+  "password": "Passw0rd!",
+  "department": "PASTE_IT_SUPPORT_DEPARTMENT_ID"
+}
+
+### wrong password 10 times in 15 min -> 429 (successful logins are not counted)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "employee@sdp.test", "password": "wrong" }
+
+### change password (use this on the live admin after the first seed)
+PUT {{baseUrl}}/auth/password
+Content-Type: application/json
+
+{ "currentPassword": "Passw0rd!", "newPassword": "A-much-longer-new-password-1" }
+
+### health: db, cron and version (no login). Live: https://<vercel-app>/api/health
+GET {{baseUrl}}/health

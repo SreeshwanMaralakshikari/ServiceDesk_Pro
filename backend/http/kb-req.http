@@ -8,7 +8,7 @@ GET {{baseUrl}}/kb-api/articles
 ### search (full-text over title, summary, content and tags)
 GET {{baseUrl}}/kb-api/articles?q=wifi
 
-### paging (limit is clamped to 1-100, page to >= 1)
+### paging (limit is clamped to 1-50, page to >= 1)
 GET {{baseUrl}}/kb-api/articles?page=2&limit=5
 
 ### staff can filter by status; Employees always see PUBLISHED only, whatever they pass
@@ -49,24 +49,49 @@ Content-Type: application/json
 PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/publish
 Content-Type: application/json
 
-{}
+{
+  "version": 1
+}
 
 ### archive (requires no note, but one can be added)
 PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/archive
 Content-Type: application/json
 
 {
-  "note": "superseded by a newer article"
+  "note": "superseded by a newer article",
+  "version": 1
 }
 
 ### restore an archived article back to draft
 PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/restore
 Content-Type: application/json
 
-{}
+{
+  "version": 1
+}
 
 ### view audit history
 GET {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/history
 
 ### soft-delete (must be archived or draft first, not published)
 DELETE {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID
+
+### --- SECURE-CORE: negative cases ---
+
+### publish without version -> 400
+PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/publish
+Content-Type: application/json
+
+{}
+
+### publish with a stale version -> 409
+PATCH {{baseUrl}}/kb-api/articles/PASTE_ARTICLE_ID/publish
+Content-Type: application/json
+
+{ "version": 999 }
+
+### paging clamp: limit=0 -> 20 (default), limit=500 -> 50
+GET {{baseUrl}}/kb-api/articles?limit=500
+
+### array filter is ignored -> still PUBLISHED only for an Employee
+GET {{baseUrl}}/kb-api/articles?status[]=DRAFT&status[]=ARCHIVED

@@ -27,51 +27,64 @@ Content-Type: application/json
 PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/activate
 Content-Type: application/json
 
-{}
+{
+  "version": 1
+}
 
 ### IN_STOCK -> ASSIGNED (assignedTo required)
 PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/assign
 Content-Type: application/json
 
 {
-  "assignedTo": "PASTE_USER_ID"
+  "assignedTo": "PASTE_USER_ID",
+  "version": 1
 }
 
 ### ASSIGNED -> IN_STOCK (returned)
 PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/return
 Content-Type: application/json
 
-{}
+{
+  "version": 1
+}
 
 ### IN_STOCK/ASSIGNED -> IN_REPAIR (also works logged in as a technician)
 PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/repair
 Content-Type: application/json
 
-{ "note": "screen flickering" }
+{ "note": "screen flickering", "version": 1 }
 
 ### IN_REPAIR -> ASSIGNED (only if it still has an assignedTo on record)
 PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/reinstate
 Content-Type: application/json
 
-{}
+{
+  "version": 1
+}
 
 ### IN_REPAIR -> IN_STOCK (clears assignedTo)
 PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/restock
 Content-Type: application/json
 
-{}
+{
+  "version": 1
+}
 
 ### terminal: -> RETIRED
 PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/retire
 Content-Type: application/json
 
-{}
+{
+  "version": 1
+}
 
 ### try ASSIGNED -> RETIRED directly (should 400 -- not in the transition table)
 PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/retire
 Content-Type: application/json
 
-{}
+{
+  "version": 1
+}
 
 ### replace an assigned/in-repair asset with one that's IN_STOCK
 PATCH {{baseUrl}}/asset-api/assets/PASTE_OLD_ASSET_ID/replace
@@ -79,7 +92,8 @@ Content-Type: application/json
 
 {
   "newAssetId": "PASTE_NEW_IN_STOCK_ASSET_ID",
-  "note": "old unit had a failing battery"
+  "note": "old unit had a failing battery",
+  "version": 1
 }
 
 ### add a maintenance entry
@@ -108,3 +122,36 @@ Content-Type: application/json
 {
   "assetId": "PASTE_MY_ASSET_ID"
 }
+
+### --- SECURE-CORE: negative cases ---
+### every transition needs the ticket's/asset's current "version" (read it from GET).
+
+### no version -> 400 (version is required)
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/activate
+Content-Type: application/json
+
+{}
+
+### stale version -> 409 (someone else changed it; refetch and retry)
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/activate
+Content-Type: application/json
+
+{ "version": 999 }
+
+### version must be an integer -> 400
+PATCH {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/activate
+Content-Type: application/json
+
+{ "version": "1" }
+
+### /replace also needs version -> 400 without it
+PATCH {{baseUrl}}/asset-api/assets/PASTE_OLD_ASSET_ID/replace
+Content-Type: application/json
+
+{ "newAssetId": "PASTE_NEW_IN_STOCK_ASSET_ID" }
+
+### paging: limit is clamped to 1-50 and page to >= 1 (response has items, total, page, totalPages)
+GET {{baseUrl}}/asset-api/assets?limit=0&page=-3
+
+### array/object filters are ignored, not turned into a Mongo operator
+GET {{baseUrl}}/asset-api/assets?status[$ne]=RETIRED&type[]=HARDWARE

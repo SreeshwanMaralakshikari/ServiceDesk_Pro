@@ -6,6 +6,7 @@ import { SLAPolicyModel } from '../models/SLAPolicyModel.js'
 import { TicketModel } from '../models/TicketModel.js'
 import { getOrgSettings } from '../models/OrgSettingsModel.js'
 import { verifyToken } from '../middlewares/verifyToken.js'
+import { validateRoleDepartment } from '../utils/validateRoleDepartment.js'
 
 export const adminApp = exp.Router()
 adminApp.use(verifyToken('ADMIN'))
@@ -21,10 +22,20 @@ adminApp.get('/users', async (req, res, next) => {
 
 adminApp.post('/users', async (req, res, next) => {
   try {
-    const { firstName, lastName, email, password, role, department } = req.body
+    const { firstName, lastName, email, password, role, department } = req.body ?? {}
     if (!firstName || !email || !password || !role) {
       //send res
       return res.status(400).json({ message: 'firstName, email, password and role are required' })
+    }
+    if (![firstName, email, password, role].every((v) => typeof v === 'string')) {
+      //send res
+      return res.status(400).json({ message: 'firstName, email, password and role must be text' })
+    }
+    // EMPLOYEE -> BUSINESS department, TECHNICIAN/MANAGER -> IT_SUPPORT team
+    const deptError = await validateRoleDepartment(role, department)
+    if (deptError) {
+      //send res
+      return res.status(400).json({ message: deptError })
     }
     const bcrypt = (await import('bcryptjs')).default
     const hashed = await bcrypt.hash(password, 10)
@@ -41,8 +52,16 @@ adminApp.patch('/users/:userId/status', async (req, res, next) => {
       //send res
       return res.status(400).json({ message: 'an admin cannot deactivate themselves' })
     }
-    const { isActive } = req.body
+    const { isActive } = req.body ?? {}
+    if (typeof isActive !== 'boolean') {
+      //send res
+      return res.status(400).json({ message: 'isActive must be true or false' })
+    }
     const user = await UserModel.findByIdAndUpdate(req.params.userId, { isActive }, { new: true, runValidators: true }).select('-password')
+    if (!user) {
+      //send res
+      return res.status(404).json({ message: 'user not found' })
+    }
     //send res
     res.status(200).json({ message: 'user status updated', payload: user })
   } catch (err) { next(err) }
@@ -59,7 +78,7 @@ adminApp.get('/departments', async (req, res, next) => {
 
 adminApp.post('/departments', async (req, res, next) => {
   try {
-    const { name, code, kind, manager } = req.body
+    const { name, code, kind, manager } = req.body ?? {}
     const department = await DepartmentModel.create({ name, code, kind, manager })
     //send res
     res.status(201).json({ message: 'department created', payload: department })
@@ -69,7 +88,7 @@ adminApp.post('/departments', async (req, res, next) => {
 // --- categories ---
 adminApp.post('/categories', async (req, res, next) => {
   try {
-    const { name, description, department, ticketType, defaultPriority, requiresApproval } = req.body
+    const { name, description, department, ticketType, defaultPriority, requiresApproval } = req.body ?? {}
     const category = await CategoryModel.create({ name, description, department, ticketType, defaultPriority, requiresApproval })
     //send res
     res.status(201).json({ message: 'category created', payload: category })
@@ -78,7 +97,7 @@ adminApp.post('/categories', async (req, res, next) => {
 
 adminApp.patch('/categories/:categoryId', async (req, res, next) => {
   try {
-    const { name, description, defaultPriority, requiresApproval, isActive } = req.body
+    const { name, description, defaultPriority, requiresApproval, isActive } = req.body ?? {}
     const category = await CategoryModel.findByIdAndUpdate(
       req.params.categoryId,
       { name, description, defaultPriority, requiresApproval, isActive },
@@ -92,7 +111,7 @@ adminApp.patch('/categories/:categoryId', async (req, res, next) => {
 // --- SLA policies (also the priority master) ---
 adminApp.post('/sla-policies', async (req, res, next) => {
   try {
-    const { priority, label, level, color, responseTimeHours, resolutionTimeHours, businessHoursOnly } = req.body
+    const { priority, label, level, color, responseTimeHours, resolutionTimeHours, businessHoursOnly } = req.body ?? {}
     const policy = await SLAPolicyModel.create({ priority, label, level, color, responseTimeHours, resolutionTimeHours, businessHoursOnly })
     //send res
     res.status(201).json({ message: 'SLA policy created', payload: policy })
@@ -101,7 +120,7 @@ adminApp.post('/sla-policies', async (req, res, next) => {
 
 adminApp.patch('/sla-policies/:policyId', async (req, res, next) => {
   try {
-    const { label, color, responseTimeHours, resolutionTimeHours, businessHoursOnly, isActive } = req.body
+    const { label, color, responseTimeHours, resolutionTimeHours, businessHoursOnly, isActive } = req.body ?? {}
     if (isActive === false) {
       const target = await SLAPolicyModel.findById(req.params.policyId)
       const inUse = await TicketModel.exists({
@@ -135,7 +154,7 @@ adminApp.get('/org-settings', async (req, res, next) => {
 
 adminApp.put('/org-settings', async (req, res, next) => {
   try {
-    const { orgName, businessHours } = req.body
+    const { orgName, businessHours } = req.body ?? {}
     const settings = await getOrgSettings()
     if (orgName !== undefined) settings.orgName = orgName
     if (businessHours) {

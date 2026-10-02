@@ -40,14 +40,17 @@ GET {{baseUrl}}/ticket-api/tickets?status=PENDING_APPROVAL
 PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/approve
 Content-Type: application/json
 
-{}
+{
+  "version": 1
+}
 
 ### ...or reject it (note is required)
 PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/reject
 Content-Type: application/json
 
 {
-  "note": "Please use the shared spare-monitor pool instead."
+  "note": "Please use the shared spare-monitor pool instead.",
+  "version": 1
 }
 
 ### list technicians in your team (manager/admin only)
@@ -58,21 +61,25 @@ PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/hold
 Content-Type: application/json
 
 {
-  "note": "Waiting on a replacement part from the vendor."
+  "note": "Waiting on a replacement part from the vendor.",
+  "version": 1
 }
 
 ### resume it
 PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/resume
 Content-Type: application/json
 
-{}
+{
+  "version": 1
+}
 
 ### reassign to a different technician (manager/admin)
 PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/reassign
 Content-Type: application/json
 
 {
-  "technicianId": "PASTE_OTHER_TECHNICIAN_ID"
+  "technicianId": "PASTE_OTHER_TECHNICIAN_ID",
+  "version": 1
 }
 
 ### --- Phase 3: SLA engine ---
@@ -84,7 +91,8 @@ PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/priority
 Content-Type: application/json
 
 {
-  "priority": "TEST"
+  "priority": "TEST",
+  "version": 1
 }
 
 ### fetch the ticket a few times over the next few minutes — the "sla"
@@ -120,3 +128,118 @@ Content-Type: application/json
   "resolutionTimeHours": 2,
   "businessHoursOnly": true
 }
+
+### --- SECURE-CORE: the rest of the lifecycle (all need "version") ---
+### Read the current version from GET /tickets/:id before every transition.
+
+### manager: assign an OPEN ticket in your team
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/assign
+Content-Type: application/json
+
+{ "technicianId": "PASTE_TECHNICIAN_ID", "version": 1 }
+
+### technician: claim an OPEN ticket in your department
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/claim
+Content-Type: application/json
+
+{ "version": 1 }
+
+### technician (assignee): start / resolve
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/start
+Content-Type: application/json
+
+{ "version": 2 }
+
+###
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/resolve
+Content-Type: application/json
+
+{ "version": 3 }
+
+### employee (requester): confirm, or reopen with a note
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/confirm
+Content-Type: application/json
+
+{ "version": 4 }
+
+###
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/reopen
+Content-Type: application/json
+
+{ "note": "Still broken after the fix.", "version": 4 }
+
+### employee: cancel own ticket (note required)
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/cancel
+Content-Type: application/json
+
+{ "note": "No longer needed.", "version": 1 }
+
+### comment (add "isInternal": true as staff; an Employee never sees internal ones)
+POST {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/comments
+Content-Type: application/json
+
+{ "text": "Checked the charger, port looks damaged.", "isInternal": true }
+
+### --- SECURE-CORE: negative cases ---
+
+### no version -> 400
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/claim
+Content-Type: application/json
+
+{}
+
+### stale version -> 409 (also what the loser of two simultaneous claims gets)
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/claim
+Content-Type: application/json
+
+{ "version": 999 }
+
+### wrong role: an Employee trying to claim -> 403
+### (login as employee@sdp.test first)
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/claim
+Content-Type: application/json
+
+{ "version": 1 }
+
+### wrong team: manager of another department assigning -> 403 (Admin bypass removed too:
+### an Admin must assign a technician who belongs to the ticket's department)
+PATCH {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID/assign
+Content-Type: application/json
+
+{ "technicianId": "PASTE_TECHNICIAN_FROM_OTHER_DEPARTMENT", "version": 1 }
+
+### unknown priority -> 400
+POST {{baseUrl}}/ticket-api/tickets
+Content-Type: application/json
+
+{
+  "title": "Bad priority",
+  "description": "Priority must match an active SLA policy.",
+  "categoryId": "PASTE_CATEGORY_ID",
+  "priority": "BANANA"
+}
+
+### TEST (level 0) priority as an Employee -> 403 (Admin only)
+POST {{baseUrl}}/ticket-api/tickets
+Content-Type: application/json
+
+{
+  "title": "Try the fast SLA",
+  "description": "Employees cannot pick the TEST priority.",
+  "categoryId": "PASTE_CATEGORY_ID",
+  "priority": "TEST"
+}
+
+### paging clamp: limit=0 -> 20 (default); limit=500 -> 50; page=-1 -> 1
+GET {{baseUrl}}/ticket-api/tickets?limit=0
+###
+GET {{baseUrl}}/ticket-api/tickets?limit=500&page=-1
+
+### array filters are ignored (no Mongo operator injection)
+GET {{baseUrl}}/ticket-api/tickets?status[$ne]=CLOSED&priority[]=HIGH
+
+### staff with no department see nothing: login as such a user -> items: [], total: 0
+GET {{baseUrl}}/ticket-api/tickets
+
+### employee: list/detail/PATCH responses never contain internal comments
+GET {{baseUrl}}/ticket-api/tickets/PASTE_TICKET_PUBLIC_ID

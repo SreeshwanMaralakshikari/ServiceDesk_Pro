@@ -163,100 +163,149 @@ export const seedKnowledgeBaseIfEmpty = async () => {
   }
 }
 
-// idempotent: only seeds when the User collection is empty
-export const seedIfEmpty = async () => {
-  const userCount = await UserModel.countDocuments()
-  if (userCount > 0) {
-    console.log('seed skipped: users already exist')
-    await seedKnowledgeBaseIfEmpty()
-    return
-  }
-  console.log('seeding demo data...')
+// find-or-create by a natural key. Never updates an existing document, so
+// re-running the seed can't overwrite anything an admin changed (and can't
+// reset a password that was rotated on the live database).
+const ensure = async (Model, filter, doc) => {
+  const existing = await Model.findOne(filter)
+  if (existing) return existing
+  return Model.create(doc)
+}
 
-  const departments = await DepartmentModel.insertMany([
-    { name: 'Human Resources', code: 'HR', kind: 'BUSINESS' },
-    { name: 'Engineering', code: 'ENG', kind: 'BUSINESS' },
-    { name: 'Service Desk', code: 'SVD', kind: 'IT_SUPPORT' },
-    { name: 'Infrastructure', code: 'INF', kind: 'IT_SUPPORT' },
-  ])
-  const [hr, eng, serviceDesk, infra] = departments
-
-  const priorities = await SLAPolicyModel.insertMany([
+const ensurePriorities = async () => {
+  const rows = [
     { priority: 'LOW', label: 'Low', level: 1, color: '#6b7280', responseTimeHours: 24, resolutionTimeHours: 72, businessHoursOnly: true },
     { priority: 'MEDIUM', label: 'Medium', level: 2, color: '#3b82f6', responseTimeHours: 8, resolutionTimeHours: 24, businessHoursOnly: true },
     { priority: 'HIGH', label: 'High', level: 3, color: '#f59e0b', responseTimeHours: 4, resolutionTimeHours: 8, businessHoursOnly: true },
     { priority: 'CRITICAL', label: 'Critical', level: 4, color: '#ef4444', responseTimeHours: 1, resolutionTimeHours: 4, businessHoursOnly: true },
     // demo/test priority: plain wall-clock, minutes not hours, so you can
-    // watch a ticket go on-track -> at-risk -> breached in real time
-    // without waiting for business hours. Not shown as a normal option —
-    // pick it explicitly in a ticket's priority dropdown to demo the SLA checker.
+    // watch a ticket go on-track -> at-risk -> breached in real time.
+    // level 0 means only an ADMIN may pick it (see TicketAPI create/priority).
     { priority: 'TEST', label: 'Test (fast demo)', level: 0, color: '#a855f7', responseTimeHours: 0.02, resolutionTimeHours: 0.05, businessHoursOnly: false },
-  ])
+  ]
+  for (const row of rows) await ensure(SLAPolicyModel, { priority: row.priority }, row)
+}
 
-  const categories = await CategoryModel.insertMany([
-    { name: 'Hardware', department: serviceDesk._id, ticketType: 'INCIDENT', defaultPriority: 'MEDIUM' },
-    { name: 'Software', department: serviceDesk._id, ticketType: 'INCIDENT', defaultPriority: 'MEDIUM' },
-    { name: 'Network', department: infra._id, ticketType: 'INCIDENT', defaultPriority: 'HIGH' },
-    { name: 'New Hardware Request', department: serviceDesk._id, ticketType: 'SERVICE_REQUEST', defaultPriority: 'LOW', requiresApproval: true },
-  ])
+// the real admin for a production database. Created only when
+// SEED_ADMIN_PASSWORD is set, and never touched afterwards (change the
+// password through PUT /api/auth/password, not by re-seeding).
+const ensureProductionAdmin = async () => {
+  const pw = process.env.SEED_ADMIN_PASSWORD
+  if (!pw) {
+    console.log('no SEED_ADMIN_PASSWORD set — skipping the production admin')
+    return
+  }
+  if (pw.length < 12) {
+    console.log('SEED_ADMIN_PASSWORD must be at least 12 characters — skipping the production admin')
+    return
+  }
+  const email = (process.env.SEED_ADMIN_EMAIL || 'admin@sdp.test').toLowerCase()
+  const existing = await UserModel.findOne({ email })
+  if (existing) {
+    console.log('production admin already exists — left unchanged')
+    return
+  }
+  await UserModel.create({ firstName: 'System', lastName: 'Admin', email, password: bcrypt.hashSync(pw, 10), role: 'ADMIN' })
+  console.log('production admin created')
+}
 
-  const hash = (pw) => bcrypt.hashSync(pw, 10)
-  const password = hash('Passw0rd!')
+// idempotent top-up: every collection is ensured on its own natural key, so
+// it is safe to run on an empty database, a half-seeded one, or the live one.
+// (name kept because server.js and `npm run seed` import it.)
+export const seedIfEmpty = async () => {
+  const isProduction = process.env.NODE_ENV === 'production'
+  console.log('ensuring seed data...')
 
-  const admin = await UserModel.create({ firstName: 'Ava', lastName: 'Admin', email: 'admin@sdp.test', password, role: 'ADMIN' })
-  const manager = await UserModel.create({ firstName: 'Mia', lastName: 'Manager', email: 'manager@sdp.test', password, role: 'MANAGER', department: serviceDesk._id })
-  const tech = await UserModel.create({ firstName: 'Theo', lastName: 'Tech', email: 'tech@sdp.test', password, role: 'TECHNICIAN', department: serviceDesk._id })
-  const employee = await UserModel.create({ firstName: 'Eli', lastName: 'Employee', email: 'employee@sdp.test', password, role: 'EMPLOYEE', department: eng._id })
-  const assetMgr = await UserModel.create({ firstName: 'Amy', lastName: 'Assets', email: 'assets@sdp.test', password, role: 'ASSET_MANAGER' })
+  const deptRows = [
+    { name: 'Human Resources', code: 'HR', kind: 'BUSINESS' },
+    { name: 'Engineering', code: 'ENG', kind: 'BUSINESS' },
+    { name: 'Service Desk', code: 'SVD', kind: 'IT_SUPPORT' },
+    { name: 'Infrastructure', code: 'INF', kind: 'IT_SUPPORT' },
+  ]
+  const depts = {}
+  for (const row of deptRows) depts[row.code] = await ensure(DepartmentModel, { code: row.code }, row)
 
-  await DepartmentModel.findByIdAndUpdate(serviceDesk._id, { manager: manager._id })
+  await ensurePriorities()
 
-  const vendors = await VendorModel.insertMany([
+  const catRows = [
+    { name: 'Hardware', department: depts.SVD._id, ticketType: 'INCIDENT', defaultPriority: 'MEDIUM' },
+    { name: 'Software', department: depts.SVD._id, ticketType: 'INCIDENT', defaultPriority: 'MEDIUM' },
+    { name: 'Network', department: depts.INF._id, ticketType: 'INCIDENT', defaultPriority: 'HIGH' },
+    { name: 'New Hardware Request', department: depts.SVD._id, ticketType: 'SERVICE_REQUEST', defaultPriority: 'LOW', requiresApproval: true },
+  ]
+  for (const row of catRows) await ensure(CategoryModel, { name: row.name }, row)
+
+  // demo accounts share a well-known password, so they never exist on a
+  // production database; there the admin comes from SEED_ADMIN_PASSWORD only
+  if (isProduction) {
+    console.log('NODE_ENV=production — demo accounts, vendors and assets skipped')
+    await ensureProductionAdmin()
+    await seedKnowledgeBaseIfEmpty()
+    console.log('seed complete')
+    return
+  }
+
+  const password = bcrypt.hashSync('Passw0rd!', 10)
+  const user = (u) => ensure(UserModel, { email: u.email }, { ...u, password })
+  const admin = await user({ firstName: 'Ava', lastName: 'Admin', email: 'admin@sdp.test', role: 'ADMIN' })
+  const manager = await user({ firstName: 'Mia', lastName: 'Manager', email: 'manager@sdp.test', role: 'MANAGER', department: depts.SVD._id })
+  const tech = await user({ firstName: 'Theo', lastName: 'Tech', email: 'tech@sdp.test', role: 'TECHNICIAN', department: depts.SVD._id })
+  const employee = await user({ firstName: 'Eli', lastName: 'Employee', email: 'employee@sdp.test', role: 'EMPLOYEE', department: depts.ENG._id })
+  const assetMgr = await user({ firstName: 'Amy', lastName: 'Assets', email: 'assets@sdp.test', role: 'ASSET_MANAGER' })
+  await ensureProductionAdmin() // a developer can also set SEED_ADMIN_PASSWORD locally
+
+  // only set the department manager when none is set yet
+  if (!depts.SVD.manager) await DepartmentModel.findByIdAndUpdate(depts.SVD._id, { manager: manager._id })
+
+  const vendorRows = [
     { name: 'Dell Technologies', contactPerson: 'Raj Mehta', email: 'raj@dellsupport.example', phone: '+91-98765-00001', servicesProvided: 'Laptop & desktop hardware' },
     { name: 'Microsoft', contactPerson: 'Priya Nair', email: 'priya@msftlicensing.example', phone: '+91-98765-00002', servicesProvided: 'Software licensing' },
     { name: 'Netgear Solutions', contactPerson: 'Sam Iyer', email: 'sam@netgearsol.example', phone: '+91-98765-00003', servicesProvided: 'Networking equipment' },
-  ])
-  const [dell, microsoft, netgear] = vendors
+  ]
+  const vendors = {}
+  for (const row of vendorRows) vendors[row.name] = await ensure(VendorModel, { name: row.name }, row)
 
   const daysFromNow = (n) => new Date(Date.now() + n * 24 * 60 * 60 * 1000)
   const daysAgo = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000)
 
-  const laptopPublicId = await generateSequentialId(AssetModel, 'AST')
-  await AssetModel.create({
-    publicId: laptopPublicId, name: 'Dell Latitude 5440', type: 'HARDWARE', assetClass: 'Laptop',
-    serialNumber: 'DL5440-0001', vendor: dell._id, purchaseDate: daysAgo(400), purchaseCost: 78000,
+  // assets are keyed on serialNumber / licenseKey; publicId is only
+  // generated when the asset really is new (it counts existing docs)
+  const ensureAsset = async (key, doc) => {
+    const existing = await AssetModel.findOne(key)
+    if (existing) return existing
+    const publicId = await generateSequentialId(AssetModel, 'AST')
+    return AssetModel.create({ publicId, ...key, ...doc })
+  }
+
+  await ensureAsset({ serialNumber: 'DL5440-0001' }, {
+    name: 'Dell Latitude 5440', type: 'HARDWARE', assetClass: 'Laptop',
+    vendor: vendors['Dell Technologies']._id, purchaseDate: daysAgo(400), purchaseCost: 78000,
     warrantyExpiry: daysFromNow(20), // deliberately inside the 30-day warranty window, to demo that report
-    status: 'ASSIGNED', assignedTo: employee._id, department: eng._id,
+    status: 'ASSIGNED', assignedTo: employee._id, department: depts.ENG._id,
     lifecycleHistory: [
       { toStatus: 'PROCURED', by: admin._id, note: 'seed data' },
       { fromStatus: 'PROCURED', toStatus: 'IN_STOCK', by: assetMgr._id },
       { fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', by: assetMgr._id, note: 'assigned to Eli Employee' },
     ],
   })
-
-  const monitorPublicId = await generateSequentialId(AssetModel, 'AST')
-  await AssetModel.create({
-    publicId: monitorPublicId, name: 'Dell 24" Monitor', type: 'HARDWARE', assetClass: 'Monitor',
-    serialNumber: 'DM24-0007', vendor: dell._id, purchaseDate: daysAgo(200), purchaseCost: 12000,
-    warrantyExpiry: daysFromNow(365), status: 'IN_STOCK', department: eng._id,
+  await ensureAsset({ serialNumber: 'DM24-0007' }, {
+    name: 'Dell 24" Monitor', type: 'HARDWARE', assetClass: 'Monitor',
+    vendor: vendors['Dell Technologies']._id, purchaseDate: daysAgo(200), purchaseCost: 12000,
+    warrantyExpiry: daysFromNow(365), status: 'IN_STOCK', department: depts.ENG._id,
     lifecycleHistory: [{ toStatus: 'PROCURED', by: admin._id }, { fromStatus: 'PROCURED', toStatus: 'IN_STOCK', by: assetMgr._id }],
   })
-
-  const licensePublicId = await generateSequentialId(AssetModel, 'AST')
-  await AssetModel.create({
-    publicId: licensePublicId, name: 'Microsoft 365 E3', type: 'SOFTWARE', assetClass: 'License',
-    licenseKey: 'M365-XXXX-YYYY-0001', vendor: microsoft._id, purchaseDate: daysAgo(100), purchaseCost: 15000,
+  await ensureAsset({ licenseKey: 'M365-XXXX-YYYY-0001' }, {
+    name: 'Microsoft 365 E3', type: 'SOFTWARE', assetClass: 'License',
+    vendor: vendors.Microsoft._id, purchaseDate: daysAgo(100), purchaseCost: 15000,
     warrantyExpiry: daysFromNow(5), // also inside the warranty window
-    status: 'ASSIGNED', assignedTo: tech._id, department: serviceDesk._id,
+    status: 'ASSIGNED', assignedTo: tech._id, department: depts.SVD._id,
     lifecycleHistory: [{ toStatus: 'PROCURED', by: admin._id }, { fromStatus: 'PROCURED', toStatus: 'IN_STOCK', by: assetMgr._id }, { fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', by: assetMgr._id }],
   })
-
-  const routerPublicId = await generateSequentialId(AssetModel, 'AST')
-  await AssetModel.create({
-    publicId: routerPublicId, name: 'Netgear Rack Switch', type: 'HARDWARE', assetClass: 'Networking',
-    serialNumber: 'NG-SW-0003', vendor: netgear._id, purchaseDate: daysAgo(600), purchaseCost: 45000,
+  await ensureAsset({ serialNumber: 'NG-SW-0003' }, {
+    name: 'Netgear Rack Switch', type: 'HARDWARE', assetClass: 'Networking',
+    vendor: vendors['Netgear Solutions']._id, purchaseDate: daysAgo(600), purchaseCost: 45000,
     warrantyExpiry: daysAgo(10), // already expired, to demo an overdue entry
-    status: 'IN_REPAIR', department: infra._id,
+    status: 'IN_REPAIR', department: depts.INF._id,
     lifecycleHistory: [{ toStatus: 'PROCURED', by: admin._id }, { fromStatus: 'PROCURED', toStatus: 'IN_STOCK', by: assetMgr._id }, { fromStatus: 'IN_STOCK', toStatus: 'IN_REPAIR', by: tech._id, note: 'intermittent port failure' }],
   })
 

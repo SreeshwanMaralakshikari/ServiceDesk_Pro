@@ -5,7 +5,9 @@ import { verifyToken } from '../middlewares/verifyToken.js'
 import { generateSequentialId } from '../utils/generateSequentialId.js'
 import { idOrPublicIdFilter } from '../utils/findByIdOrPublicId.js'
 import { buildKbQuery } from '../utils/buildKbQuery.js'
-import { isKbTransitionAllowed } from '../utils/kbTransitions.js'
+import { KB_TRANSITIONS, isKbTransitionAllowed } from '../utils/kbTransitions.js'
+import { atomicTransition, isValidVersion, VERSION_REQUIRED_MESSAGE } from '../utils/atomicTransition.js'
+import { getPagination, toPage } from '../utils/pagination.js'
 
 export const kbApp = exp.Router()
 
@@ -43,23 +45,19 @@ kbApp.get('/articles', verifyToken(...ALL_ROLES), async (req, res, next) => {
     const { status, category, q } = req.query
     const query = buildKbQuery(req.user, { status, category, q })
 
-    // clamp paging so ?limit=0 / ?limit=abc / ?page=-3 can't yield
-    // totalPages of Infinity/NaN or a negative skip
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100)
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1)
-    const skip = (page - 1) * limit
+    const paging = getPagination(req.query)
     const [items, total] = await Promise.all([
       KnowledgeArticleModel.find(query)
         .select('-content -history') // list view: no need to ship the full body/audit trail
         .populate('category', 'name department')
         .populate('author', 'firstName lastName role')
         .sort({ publishedAt: -1, createdAt: -1, _id: -1 }) // _id last so equal timestamps still page deterministically
-        .skip(skip)
-        .limit(limit),
+        .skip(paging.skip)
+        .limit(paging.limit),
       KnowledgeArticleModel.countDocuments(query),
     ])
     //send res
-    res.status(200).json({ message: 'articles fetched', payload: { items, total, page, totalPages: Math.ceil(total / limit) } })
+    res.status(200).json({ message: 'articles fetched', payload: toPage(items, total, paging) })
   } catch (err) { next(err) }
 })
 
@@ -235,9 +233,18 @@ kbApp.patch('/articles/:articleId/:action', verifyToken(...WRITE_ROLES), async (
       //send res
       return res.status(404).json({ message: 'article not found' })
     }
+    if (!isValidVersion(version)) {
+      //send res
+      return res.status(400).json({ message: VERSION_REQUIRED_MESSAGE })
+    }
 
     const check = isKbTransitionAllowed(action, article.status, req.user.role)
     if (!check.ok) {
+      // a stale version beats "wrong status": the caller is looking at old data
+      if (check.reason.startsWith('cannot ') && version !== article.version) {
+        //send res
+        return res.status(409).json({ message: 'article was updated by someone else, please refresh' })
+      }
       //send res
       return res.status(check.reason.includes('authorized') ? 403 : 400).json({ message: check.reason })
     }
@@ -245,22 +252,29 @@ kbApp.patch('/articles/:articleId/:action', verifyToken(...WRITE_ROLES), async (
       //send res
       return res.status(403).json({ message: 'only the author (or a manager/admin) can do this' })
     }
-    if (typeof version === 'number' && version !== article.version) {
+    if (version !== article.version) {
       //send res
       return res.status(409).json({ message: 'article was updated by someone else, please refresh' })
     }
 
-    const from = article.status
-    article.status = check.to
-    article.version += 1
-    article.history.push({ fromStatus: from, toStatus: check.to, by: req.user.id, note })
-    if (action === 'publish') article.publishedAt = new Date()
-    if (action === 'archive') article.archivedAt = new Date()
-    if (action === 'restore') article.archivedAt = undefined
+    const now = new Date()
+    const set = { status: check.to }
+    const unset = {}
+    if (action === 'publish') set.publishedAt = now
+    if (action === 'archive') set.archivedAt = now
+    if (action === 'restore') unset.archivedAt = ''
 
-    await article.save()
+    const result = await atomicTransition({
+      Model: KnowledgeArticleModel, doc: article, action, noun: 'article', from: KB_TRANSITIONS[action].from, version,
+      set, unset,
+      push: { history: { fromStatus: article.status, toStatus: check.to, by: req.user.id, note, at: now } },
+    })
+    if (result.error) {
+      //send res
+      return res.status(result.error.status).json({ message: result.error.message })
+    }
     //send res
-    res.status(200).json({ message: `article ${action}ed`, payload: article })
+    res.status(200).json({ message: `article ${action}ed`, payload: result.doc })
   } catch (err) { next(err) }
 })
 

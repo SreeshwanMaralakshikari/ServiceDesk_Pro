@@ -78,7 +78,7 @@ export const AssetDetail = () => {
   const runReplace = async () => {
     if (!replacementPick) return toast.error('Pick a replacement asset first')
     try {
-      await axiosInstance.patch(`/asset-api/assets/${assetId}/replace`, { newAssetId: replacementPick, note })
+      await axiosInstance.patch(`/asset-api/assets/${assetId}/replace`, { newAssetId: replacementPick, note, version: asset.version })
       toast.success('Asset replaced')
       setReplacementPick(''); setNote('')
       load()

@@ -40,6 +40,7 @@ const realListen = express.application.listen
 express.application.listen = function (_port, cb) { serverRef = realListen.call(this, 0, cb); return serverRef }
 const jwt = require('jsonwebtoken')
 const sift = require('sift')
+const applyUpdatePromise = import('../testkit/applyUpdate.js')
 
 const oid = (n) => String(n).padStart(24, '0')
 const USERS = {
@@ -107,12 +108,19 @@ describe('real server.js + KB (only DB/cron stubbed)', () => {
     K = (await import('../models/KnowledgeArticleModel.js')).KnowledgeArticleModel
     C = (await import('../models/CategoryModel.js')).CategoryModel
     U = (await import('../models/UserModel.js')).UserModel
-    saved.K = { find: K.find, findOne: K.findOne, countDocuments: K.countDocuments, updateOne: K.updateOne, create: K.create }
+    saved.K = { findOneAndUpdate: K.findOneAndUpdate, find: K.find, findOne: K.findOne, countDocuments: K.countDocuments, updateOne: K.updateOne, create: K.create }
     saved.C = { findOne: C.findOne }; saved.U = { findById: U.findById }
 
     U.findById = (id) => lazy(() => { const u = Object.values(USERS).find((x) => x._id === String(id)); return u && { ...u, isActive: true } })
     C.findOne = (f) => lazy(() => { castCheck(saved.C.findOne, C, f); return String(f._id) === CAT_ID ? { _id: CAT_ID } : null })
     K.findOne = (f) => lazy(() => { castCheck(saved.K.findOne, K, f); const h = store.find(sift(f)); return h ? hydrate(h) : null })
+    const { applyUpdate } = await applyUpdatePromise
+    K.findOneAndUpdate = async (f, u) => {
+      const i = store.findIndex(sift(JSON.parse(JSON.stringify(f))))
+      if (i < 0) return null
+      applyUpdate(store[i], u)
+      return hydrate(store[i])
+    }
     K.find = (f) => lazy(() => { castCheck(saved.K.find, K, f); return store.filter(sift(strip(f))).map(hydrate) })
     K.countDocuments = async (f) => { castCheck(saved.K.countDocuments, K, f); return store.filter(sift(strip(f))).length }
     K.updateOne = async (f, u) => { const d = store.find((x) => x._id === String(f._id)); if (d && u.$inc) for (const k in u.$inc) d[k] += u.$inc[k]; return {} }
@@ -166,12 +174,12 @@ describe('real server.js + KB (only DB/cron stubbed)', () => {
     const id = created.body.payload.publicId
     assert.equal((await call('tech', 'GET', `/kb-api/articles/${id}`)).status, 200)
     assert.equal((await call('emp', 'GET', `/kb-api/articles/${id}`)).status, 404)
-    assert.equal((await call('tech', 'PATCH', `/kb-api/articles/${id}/publish`, {})).status, 200)
+    assert.equal((await call('tech', 'PATCH', `/kb-api/articles/${id}/publish`, { version: 0 })).status, 200)
     const list = await call('emp', 'GET', '/kb-api/articles')
     assert.equal(list.body.payload.total, 1)
     assert.equal((await call('emp', 'GET', `/kb-api/articles/${id}`)).status, 200)
     assert.equal((await call('tech', 'DELETE', `/kb-api/articles/${id}`)).status, 400) // still published
-    assert.equal((await call('tech', 'PATCH', `/kb-api/articles/${id}/archive`, {})).status, 200)
+    assert.equal((await call('tech', 'PATCH', `/kb-api/articles/${id}/archive`, { version: 1 })).status, 200)
     assert.equal((await call('tech', 'DELETE', `/kb-api/articles/${id}`)).status, 200)
     assert.equal((await call('manager', 'GET', '/kb-api/articles')).body.payload.total, 0)
   })

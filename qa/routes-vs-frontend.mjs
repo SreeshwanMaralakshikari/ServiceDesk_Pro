@@ -8,8 +8,8 @@ const ROOT = nodePath.resolve(nodePath.dirname(fileURLToPath(import.meta.url)), 
 const load = (p) => import(pathToFileURL(p).href)
 import fs from 'fs'; import path from 'path'
 const B=(ROOT+'/backend/'), F=(ROOT+'/frontend/src')
-// 1) mounts from server.js -> real routers, real registration order
-const server=fs.readFileSync(B+'server.js','utf8')
+// 1) mounts from app.js -> real routers, real registration order
+const server=fs.readFileSync(B+'app.js','utf8')
 const imports=Object.fromEntries([...server.matchAll(/import \{ (\w+) \} from '\.\/APIs\/(\w+)\.js'/g)].map(m=>[m[1],m[2]]))
 const routes=[]
 for(const m of server.matchAll(/app\.use\('(\/[\w-]+)', (\w+)\)/g)){

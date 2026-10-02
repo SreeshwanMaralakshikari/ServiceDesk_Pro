@@ -46,9 +46,6 @@ export const Login = () => {
         <p className="text-sm text-slate-500 mt-4">
           No account? <Link to="/register" className="text-indigo-600">Register</Link>
         </p>
-        <p className="text-xs text-slate-400 mt-2">
-          Demo: admin@sdp.test / manager@sdp.test / tech@sdp.test / employee@sdp.test — password: Passw0rd!
-        </p>
       </div>
     </div>
   )
