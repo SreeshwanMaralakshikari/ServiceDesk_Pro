@@ -1,7 +1,9 @@
+import { Link } from 'react-router-dom'
 import { useFetch } from '../../hooks/useFetch.js'
 import { Spinner } from '../common/Spinner.jsx'
 import { StatusBadge, PriorityBadge } from '../common/Badges.jsx'
 import { styles } from '../../styles/common.js'
+import { pct } from '../reports/DashboardView.jsx'
 
 export const AdminDashboard = () => {
   const { data: stats, loading, error } = useFetch('/admin-api/dashboard')
@@ -22,6 +24,20 @@ export const AdminDashboard = () => {
         <p className="text-slate-500 text-sm mb-2">By status</p>
         <div className="flex flex-wrap gap-3">
           {stats.byStatus.map((s) => <span key={s._id} className="text-sm flex items-center gap-2"><StatusBadge status={s._id} /> {s.count}</span>)}
+        </div>
+      </div>
+      <div className={styles.card + ' col-span-2 md:col-span-4'}>
+        <p className="text-slate-500 text-sm mb-2">Service levels (last 30 days, all teams)</p>
+        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+          <span>Response SLA met: <b>{pct(stats.overview.sla.response.compliance)}</b></span>
+          <span>Resolution SLA met: <b>{pct(stats.overview.sla.resolution.compliance)}</b></span>
+          <span>Breached now: <b className={stats.overview.sla.current.breached ? 'text-red-700' : ''}>{stats.overview.sla.current.breached ? '⚠ ' : ''}{stats.overview.sla.current.breached}</b></span>
+          <span>Unassigned: <b>{stats.overview.sla.current.unassigned}</b></span>
+          <span>CSAT: <b>{stats.overview.csat.average === null ? '—' : `${stats.overview.csat.average} / 5`}</b> ({stats.overview.csat.count})</span>
+        </div>
+        <div className="flex gap-4 mt-3">
+          <Link to="/manager/dashboard" className={styles.btnLink}>Open the full dashboard</Link>
+          <Link to="/reports" className={styles.btnLink}>Ticket report and CSV</Link>
         </div>
       </div>
     </div>

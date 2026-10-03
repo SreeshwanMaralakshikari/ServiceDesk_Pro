@@ -8,7 +8,8 @@ import { MongoMemoryServer } from 'mongodb-memory-server'
 
 export const PASSWORD = 'Passw0rd!'
 
-export const bootApp = async (envOverrides = {}) => {
+// `fixtures: false` boots an empty database, for tests that load the real seed (utils/seedData.js) instead
+export const bootApp = async (envOverrides = {}, { fixtures = true } = {}) => {
   // set before app.js is imported: dotenv never overrides a variable that already exists
   Object.assign(process.env, {
     NODE_ENV: 'test',
@@ -33,7 +34,7 @@ export const bootApp = async (envOverrides = {}) => {
   if (external) await Promise.allSettled(inits)
   else await Promise.all(inits)
 
-  const fx = await seedFixtures()
+  const fx = fixtures ? await seedFixtures() : null
   const stop = async () => {
     if (external) await mongoose.connection.dropDatabase()
     await mongoose.disconnect()

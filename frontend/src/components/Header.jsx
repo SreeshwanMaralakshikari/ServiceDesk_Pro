@@ -23,10 +23,14 @@ export const Header = () => {
             <>
               {user?.role !== 'ASSET_MANAGER' && <Link to="/tickets" className={styles.navLink}>My Tickets</Link>}
               {user?.role === 'TECHNICIAN' && <Link to="/my-queue" className={styles.navLink}>My Queue</Link>}
+              {user?.role === 'TECHNICIAN' && <Link to="/tech/dashboard" className={styles.navLink}>My Dashboard</Link>}
+              {(user?.role === 'MANAGER' || user?.role === 'ADMIN') && <Link to="/manager/dashboard" className={styles.navLink}>Dashboard</Link>}
               {(user?.role === 'MANAGER' || user?.role === 'ADMIN') && <Link to="/approvals" className={styles.navLink}>Approvals</Link>}
+              {(user?.role === 'MANAGER' || user?.role === 'ADMIN') && <Link to="/reports" className={styles.navLink}>Reports</Link>}
               <Link to="/kb" className={styles.navLink}>Knowledge Base</Link>
               <Link to="/my-assets" className={styles.navLink}>My Assets</Link>
               {(user?.role === 'ASSET_MANAGER' || user?.role === 'ADMIN' || user?.role === 'TECHNICIAN') && <Link to="/assets" className={styles.navLink}>Assets</Link>}
+              {(user?.role === 'ASSET_MANAGER' || user?.role === 'ADMIN') && <Link to="/asset-stats" className={styles.navLink}>Asset Stats</Link>}
               {(user?.role === 'ASSET_MANAGER' || user?.role === 'ADMIN') && <Link to="/vendors" className={styles.navLink}>Vendors</Link>}
               {user?.role === 'ADMIN' && <Link to="/admin" className={styles.navLink}>Admin</Link>}
               <NotificationBell />

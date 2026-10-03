@@ -3,7 +3,7 @@ import { useFetch } from '../../hooks/useFetch.js'
 import { DataTable } from '../common/DataTable.jsx'
 import { styles } from '../../styles/common.js'
 
-const ENTITY_TYPES = ['TICKET', 'ASSET', 'KB_ARTICLE', 'USER', 'WORK_LOG', 'DEPARTMENT', 'CATEGORY', 'SLA_POLICY', 'ORG_SETTINGS']
+const ENTITY_TYPES = ['TICKET', 'ASSET', 'KB_ARTICLE', 'USER', 'WORK_LOG', 'DEPARTMENT', 'CATEGORY', 'SLA_POLICY', 'ORG_SETTINGS', 'REPORT']
 const BLANK = { entityType: '', entityRef: '', action: '' }
 
 export const AuditPage = () => {

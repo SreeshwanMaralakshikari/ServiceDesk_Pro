@@ -5,6 +5,10 @@ import { verifyToken } from '../middlewares/verifyToken.js'
 import { buildQueue } from '../utils/dsa/smartQueue.js'
 import { TECH_ACTIVE_STATUSES } from '../utils/ticketStatuses.js'
 import { toTicketListItem } from '../utils/ticketView.js'
+import { WorkLogModel } from '../models/WorkLogModel.js'
+import { buildTicketQuery } from '../utils/buildTicketQuery.js'
+import { buildTechnicianDashboard, parseDays, windowStart } from '../utils/dashboardStats.js'
+import { loadScopedTickets, loadPolicies, loadBusinessHours, ROW_CAP } from '../utils/dashboardData.js'
 
 export const techApp = exp.Router()
 
@@ -44,6 +48,32 @@ techApp.get('/queue', verifyToken('TECHNICIAN'), async (req, res, next) => {
         unassigned: buildQueue(openRows.map(withLevel), { now, limit: QUEUE_LIMIT }),
       },
     })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// A technician's own numbers: open work and its SLA state, resolved tickets, CSAT, time logged.
+// Only tickets assigned to the caller (inside the caller's team scope). ?days=7|30|90|all (default 30)
+techApp.get('/dashboard', verifyToken('TECHNICIAN'), async (req, res, next) => {
+  try {
+    const days = parseDays(req.query.days)
+    if (days === undefined) {
+      //send res
+      return res.status(400).json({ message: 'days must be 7, 30, 90 or all' })
+    }
+    const now = new Date()
+    const from = windowStart(now, days)
+    // the team scope first, then "assigned to me" (a technician without a team matches nothing)
+    const query = { ...buildTicketQuery(req.user, {}), assignedTo: req.user.id }
+    const [{ tickets, truncated }, policies, settings, workLogs] = await Promise.all([
+      loadScopedTickets(query),
+      loadPolicies(),
+      loadBusinessHours(),
+      WorkLogModel.find({ technician: req.user.id, ...(from ? { createdAt: { $gte: from } } : {}) }).select('minutesSpent createdAt').sort({ createdAt: -1 }).limit(ROW_CAP).lean(),
+    ])
+    //send res
+    res.status(200).json({ message: 'dashboard fetched', payload: buildTechnicianDashboard({ tickets, workLogs, policies, settings, now, days, truncated }) })
   } catch (err) {
     next(err)
   }

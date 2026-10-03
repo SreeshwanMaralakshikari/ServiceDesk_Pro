@@ -1,11 +1,13 @@
 import { TicketModel } from '../models/TicketModel.js'
 import { UserModel } from '../models/UserModel.js'
 import { createNotification, notifyMany } from './createNotification.js'
+import { SLA_RUNNING_STATUSES } from './ticketStatuses.js'
 
 // SLA clock only actually runs in these statuses (Section 6b): not while
 // PENDING_APPROVAL (no clock yet), not while ON_HOLD (paused), and not in
-// any terminal state.
-export const SLA_RUNNING_STATUSES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'REOPENED']
+// any terminal state. The list lives in ticketStatuses.js so the dashboards
+// can use it without importing the models; re-exported for the cron job.
+export { SLA_RUNNING_STATUSES }
 
 // a populated ticket may have assignedTo as a populated doc — normalize
 // back to a plain id before using it as a notification recipient

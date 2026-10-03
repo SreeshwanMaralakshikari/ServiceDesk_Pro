@@ -14,6 +14,8 @@ import { getPagination, toPage } from '../utils/pagination.js'
 import { asText, asBool, escapeRegex, isObjectIdString } from '../utils/queryParams.js'
 import { passwordProblem } from '../utils/passwordRule.js'
 import { FINISHED_STATUSES, TECH_ACTIVE_STATUSES } from '../utils/ticketStatuses.js'
+import { parseDays } from '../utils/dashboardStats.js'
+import { loadDashboard } from '../utils/dashboardData.js'
 import {
   normalizeSkills, cleanText, validateBusinessHours, validateSlaHours, validateColor,
   normalizePriorityCode, normalizeDepartmentCode,
@@ -910,8 +912,15 @@ adminApp.put('/org-settings', async (req, res, next) => {
 })
 
 // --- dashboard ---
+// The first five keys are the original counts (the shape did not change). `overview` is the full
+// all-teams dashboard (same numbers as /manager-api/dashboard), so the page can show SLA, CSAT and a team comparison.
 adminApp.get('/dashboard', async (req, res, next) => {
   try {
+    const days = parseDays(req.query.days)
+    if (days === undefined) {
+      //send res
+      return res.status(400).json({ message: 'days must be 7, 30, 90 or all' })
+    }
     const [totalTickets, openTickets, byStatus, byPriority, userCount] = await Promise.all([
       TicketModel.countDocuments({ isDeleted: false }),
       TicketModel.countDocuments({ isDeleted: false, status: { $nin: FINISHED_STATUSES } }),
@@ -919,7 +928,8 @@ adminApp.get('/dashboard', async (req, res, next) => {
       TicketModel.aggregate([{ $match: { isDeleted: false } }, { $group: { _id: '$priority', count: { $sum: 1 } } }]),
       UserModel.countDocuments({ isActive: true }),
     ])
+    const overview = await loadDashboard({ user: req.user, days })
     //send res
-    res.status(200).json({ message: 'dashboard fetched', payload: { totalTickets, openTickets, byStatus, byPriority, userCount } })
+    res.status(200).json({ message: 'dashboard fetched', payload: { totalTickets, openTickets, byStatus, byPriority, userCount, overview } })
   } catch (err) { next(err) }
 })

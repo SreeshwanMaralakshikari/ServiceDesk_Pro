@@ -1,0 +1,71 @@
+@baseUrl = http://localhost:5000
+
+### DASHBOARDS-REPORTS: manager dashboard, ticket report and CSV exports
+### Log in first (cookie), e.g. POST {{baseUrl}}/auth/login with manager@sdp.test / Passw0rd!
+### Demo accounts: mia (Service Desk manager), ian (Infrastructure manager), admin, assets, tech (Theo), nia (Infrastructure tech)
+
+### manager dashboard: SLA, workload, CSAT, trend. ?days = 7, 30 (default), 90 or all
+GET {{baseUrl}}/manager-api/dashboard
+
+###
+GET {{baseUrl}}/manager-api/dashboard?days=7
+
+###
+GET {{baseUrl}}/manager-api/dashboard?days=all
+
+### admin only: one team (an IT_SUPPORT department id from GET /admin-api/departments?kind=IT_SUPPORT)
+GET {{baseUrl}}/manager-api/dashboard?department=PASTE_DEPARTMENT_ID
+
+### negative: invalid period -> 400
+GET {{baseUrl}}/manager-api/dashboard?days=14
+
+### negative: as admin, a BUSINESS department or a malformed id -> 400 (as a manager the param is ignored: 200)
+GET {{baseUrl}}/manager-api/dashboard?department=nope
+
+### negative: as an employee, technician or asset manager -> 403; with no cookie -> 401
+
+### admin overview (same numbers for all teams) under "overview", old keys unchanged
+GET {{baseUrl}}/admin-api/dashboard?days=30
+
+### negative: -> 400
+GET {{baseUrl}}/admin-api/dashboard?days=abc
+
+### technician dashboard (log in as tech@sdp.test): own tickets, SLA, CSAT, time logged
+GET {{baseUrl}}/tech-api/dashboard?days=30
+
+### negative: -> 400
+GET {{baseUrl}}/tech-api/dashboard?days=0
+
+### asset statistics (assets@sdp.test or admin)
+GET {{baseUrl}}/asset-api/stats
+
+### ticket report preview, same filters as the CSV. from/to are IST dates (YYYY-MM-DD), to is inclusive
+GET {{baseUrl}}/report-api/tickets?status=CLOSED&priority=HIGH&from=2026-09-01&to=2026-10-03&page=1&limit=15
+
+### CSV download (UTF-8 with BOM, CRLF). Headers: X-Row-Count, X-Truncated
+GET {{baseUrl}}/report-api/tickets.csv?from=2026-09-01&to=2026-10-03
+
+###
+GET {{baseUrl}}/report-api/tickets.csv?q=printer
+
+### negative: impossible date, wrong format, or from after to -> 400
+GET {{baseUrl}}/report-api/tickets.csv?from=2026-02-31
+
+###
+GET {{baseUrl}}/report-api/tickets.csv?from=03-10-2026
+
+###
+GET {{baseUrl}}/report-api/tickets.csv?from=2026-10-03&to=2026-10-01
+
+### an unknown status or priority is not an error (same as the ticket list): 200 with just the header row
+GET {{baseUrl}}/report-api/tickets.csv?status=DONE
+
+### negative: a manager passing department of another team is ignored (their own team is always used); an employee -> 403
+
+### asset CSV (assets@sdp.test or admin); ?status=IN_STOCK etc
+GET {{baseUrl}}/report-api/assets.csv
+
+### negative: unknown status -> 400
+GET {{baseUrl}}/report-api/assets.csv?status=LOST
+
+### negative: a manager or technician -> 403

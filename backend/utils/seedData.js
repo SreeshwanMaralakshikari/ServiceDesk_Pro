@@ -8,6 +8,7 @@ import { VendorModel } from '../models/VendorModel.js'
 import { AssetModel } from '../models/AssetModel.js'
 import { KnowledgeArticleModel } from '../models/KnowledgeArticleModel.js'
 import { generateSequentialId } from './generateSequentialId.js'
+import { ensureDemoTickets } from './demoTickets.js'
 
 config()
 
@@ -245,7 +246,9 @@ export const seedIfEmpty = async () => {
     return
   }
 
-  const password = bcrypt.hashSync('Passw0rd!', 10)
+  // demo accounts share one password. Set SEED_DEMO_PASSWORD (min 8 chars) when seeding a database other people can reach
+  const demoPassword = (process.env.SEED_DEMO_PASSWORD || '').length >= 8 ? process.env.SEED_DEMO_PASSWORD : 'Passw0rd!'
+  const password = bcrypt.hashSync(demoPassword, 10)
   const user = (u) => ensure(UserModel, { email: u.email }, { ...u, password })
   const admin = await user({ firstName: 'Ava', lastName: 'Admin', email: 'admin@sdp.test', role: 'ADMIN' })
   const manager = await user({ firstName: 'Mia', lastName: 'Manager', email: 'manager@sdp.test', role: 'MANAGER', department: depts.SVD._id })
@@ -261,6 +264,13 @@ export const seedIfEmpty = async () => {
   await user({ firstName: 'Tara', lastName: 'Tech', email: 'tara@sdp.test', role: 'TECHNICIAN', department: depts.SVD._id, skills: ['software', 'outlook', 'office', 'vpn'] })
   await user({ firstName: 'Ravi', lastName: 'Tech', email: 'ravi@sdp.test', role: 'TECHNICIAN', department: depts.SVD._id, skills: ['hardware', 'laptop', 'monitor'] })
   await user({ firstName: 'Noor', lastName: 'Network', email: 'noor@sdp.test', role: 'TECHNICIAN', department: depts.INF._id, skills: ['network', 'wifi', 'vpn', 'firewall'] })
+  // dashboard demo people: a manager and a second technician for the Infrastructure team, and two more
+  // requesters, so both teams and several employees show up in the dashboards and reports
+  const ian = await user({ firstName: 'Ian', lastName: 'Infra', email: 'ian@sdp.test', role: 'MANAGER', department: depts.INF._id })
+  await user({ firstName: 'Nia', lastName: 'Network', email: 'nia@sdp.test', role: 'TECHNICIAN', department: depts.INF._id, skills: ['network', 'wifi', 'firewall'] })
+  await user({ firstName: 'Hana', lastName: 'Employee', email: 'hana@sdp.test', role: 'EMPLOYEE', department: depts.HR._id })
+  await user({ firstName: 'Omar', lastName: 'Employee', email: 'omar@sdp.test', role: 'EMPLOYEE', department: depts.ENG._id })
+  if (!depts.INF.manager) await DepartmentModel.findByIdAndUpdate(depts.INF._id, { manager: ian._id })
   await UserModel.updateOne({ _id: tech._id, skills: { $exists: false } }, { $set: { skills: ['hardware', 'laptop', 'printer'] } })
   const dsaCategories = [
     { name: 'Hardware', autoAssign: true, skills: ['hardware', 'laptop', 'printer', 'monitor'] },
@@ -328,8 +338,17 @@ export const seedIfEmpty = async () => {
 
   await seedKnowledgeBaseIfEmpty()
 
-  console.log('seed complete. demo logins (password: Passw0rd!):')
-  console.log('  admin@sdp.test / manager@sdp.test / tech@sdp.test / employee@sdp.test / assets@sdp.test')
+  // back-dated demo tickets (with CSAT and work logs) so the dashboards have something to show.
+  // Wrapped like the KB top-up: a problem here must never stop the server from starting
+  try {
+    const demo = await ensureDemoTickets()
+    console.log(demo.skipped ? `demo tickets skipped: ${demo.skipped}` : `demo tickets: ${demo.created} created, ${demo.existing} already there, ${demo.workLogs} work logs`)
+  } catch (err) {
+    console.log('demo tickets failed (non-fatal):', err.message)
+  }
+
+  console.log(`seed complete. demo logins (password: ${demoPassword === 'Passw0rd!' ? 'Passw0rd!' : 'the SEED_DEMO_PASSWORD you set'}):`)
+  console.log('  admin@sdp.test / manager@sdp.test / ian@sdp.test (Infrastructure manager) / tech@sdp.test / employee@sdp.test / assets@sdp.test')
 }
 
 // allow `npm run seed` to run this directly

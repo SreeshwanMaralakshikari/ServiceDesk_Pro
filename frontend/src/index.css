@@ -1,1 +1,22 @@
 @import "tailwindcss";
+
+/* chart tokens: series 1 and 2 from the validated categorical palette (both modes pass the validator).
+   the app itself is light only, so the dark set applies only when a page opts in with data-theme="dark" */
+:root {
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-grid: #e2e8f0;
+  --chart-surface: #ffffff;
+  --chart-ink: #0f172a;
+  --chart-ink-2: #475569;
+  --chart-ink-3: #64748b;
+}
+:root[data-theme="dark"] {
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-grid: #334155;
+  --chart-surface: #0f172a;
+  --chart-ink: #f1f5f9;
+  --chart-ink-2: #cbd5e1;
+  --chart-ink-3: #94a3b8;
+}

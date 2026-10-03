@@ -29,6 +29,10 @@ import { VendorList } from './components/vendors/VendorList.jsx'
 import { KnowledgeBase } from './components/kb/KnowledgeBase.jsx'
 import { ArticleDetail } from './components/kb/ArticleDetail.jsx'
 import { ArticleForm } from './components/kb/ArticleForm.jsx'
+import { ManagerDashboard } from './components/reports/ManagerDashboard.jsx'
+import { ReportsPage } from './components/reports/ReportsPage.jsx'
+import { AssetStats } from './components/assets/AssetStats.jsx'
+import { TechDashboard } from './components/tech/TechDashboard.jsx'
 
 export const router = createBrowserRouter([
   {
@@ -66,12 +70,15 @@ export const router = createBrowserRouter([
         element: <ProtectedRoutes allowedRoles={['TECHNICIAN']} />,
         children: [
           { path: 'my-queue', element: <MyQueue /> },
+          { path: 'tech/dashboard', element: <TechDashboard /> },
         ],
       },
       {
         element: <ProtectedRoutes allowedRoles={['MANAGER', 'ADMIN']} />,
         children: [
           { path: 'approvals', element: <ApprovalsInbox /> },
+          { path: 'manager/dashboard', element: <ManagerDashboard /> },
+          { path: 'reports', element: <ReportsPage /> },
         ],
       },
       {
@@ -86,6 +93,7 @@ export const router = createBrowserRouter([
         children: [
           { path: 'assets/new', element: <CreateAsset /> },
           { path: 'vendors', element: <VendorList /> },
+          { path: 'asset-stats', element: <AssetStats /> },
         ],
       },
       {

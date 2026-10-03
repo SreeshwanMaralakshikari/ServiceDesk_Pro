@@ -4,6 +4,8 @@ import { styles } from '../styles/common.js'
 
 export const Home = () => {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const role = useAuthStore((s) => s.user?.role)
+  const dashboard = { MANAGER: '/manager/dashboard', ADMIN: '/manager/dashboard', TECHNICIAN: '/tech/dashboard', ASSET_MANAGER: '/asset-stats' }[role]
   return (
     <div className={styles.container}>
       <div className={styles.card}>
@@ -15,7 +17,12 @@ export const Home = () => {
             <Link to="/register" className={styles.btnSecondary}>Register</Link>
           </div>
         )}
-        {isAuthenticated && <Link to="/tickets" className={styles.btnPrimary}>Go to my tickets</Link>}
+        {isAuthenticated && (
+          <div className="flex gap-3">
+            {role !== 'ASSET_MANAGER' && <Link to="/tickets" className={styles.btnPrimary}>Go to my tickets</Link>}
+            {dashboard && <Link to={dashboard} className={role === 'ASSET_MANAGER' ? styles.btnPrimary : styles.btnSecondary}>Open my dashboard</Link>}
+          </div>
+        )}
       </div>
     </div>
   )

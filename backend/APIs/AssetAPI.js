@@ -11,6 +11,9 @@ import { getPagination, toPage } from '../utils/pagination.js'
 import { asText } from '../utils/queryParams.js'
 import { createNotification } from '../utils/createNotification.js'
 import { logAudit } from '../utils/logAudit.js'
+import { VendorModel } from '../models/VendorModel.js'
+import { buildAssetStats } from '../utils/assetStats.js'
+import { ROW_CAP } from '../utils/dashboardData.js'
 
 export const assetApp = exp.Router()
 
@@ -61,6 +64,19 @@ assetApp.get('/assets', verifyToken(...READ_ROLES), async (req, res, next) => {
     ])
     //send res
     res.status(200).json({ message: 'assets fetched', payload: toPage(items, total, paging) })
+  } catch (err) { next(err) }
+})
+
+// numbers for the Asset Manager / Admin page: status mix, warranty window, costs, vendors.
+// "/stats" has no :assetId segment, so nothing below can swallow it
+assetApp.get('/stats', verifyToken(...MANAGE_ROLES), async (req, res, next) => {
+  try {
+    const [assets, vendors] = await Promise.all([
+      AssetModel.find({ isDeleted: false }).select('status type assetClass vendor purchaseCost warrantyExpiry maintenance.cost').limit(ROW_CAP).lean(),
+      VendorModel.find().select('name').lean(),
+    ])
+    //send res
+    res.status(200).json({ message: 'asset stats fetched', payload: buildAssetStats({ assets, vendors }) })
   } catch (err) { next(err) }
 })
 
