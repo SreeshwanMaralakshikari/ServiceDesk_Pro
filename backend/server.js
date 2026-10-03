@@ -8,10 +8,8 @@ import { startWarrantyChecker, runWarrantyCheck } from './jobs/warrantyChecker.j
 
 // fail fast if required env vars are missing
 const required = ['MONGO_URI', 'JWT_SECRET', 'CLIENT_URL']
-for (const key of required)
-{
-  if(!process.env[key])
-  {
+for (const key of required) {
+  if (!process.env[key]) {
     console.error(`Missing required env var: ${key}. Copy .env.example to .env and fill it in.`)
     process.exit(1)
   }
@@ -24,13 +22,15 @@ const hasDbName = (uri) => {
   const afterHosts = uri.replace(/^mongodb(\+srv)?:\/\//, '').split('?')[0]
   return /\/[^/]+$/.test(afterHosts)
 }
-
-if(!hasDbName(process.env.MONGO_URI))
-{
+if (!hasDbName(process.env.MONGO_URI)) {
   console.log('WARNING: MONGO_URI has no database name, so MongoDB uses the default "test" database. Use .../servicedeskpro_dev locally and .../servicedeskpro_prod on Render.')
 }
 
-let listening = false
+// listen first, connect second: the port opens straight away (Render's health check and the
+// first requests find the server), /health reports db "down" until the connection is up, and a
+// failing connect retries without ever touching the listener
+const port = process.env.PORT || 5000
+app.listen(port, () => console.log(`server listening on ${port}...`))
 
 const connectDB = async (attempt = 1) => {
   const maxAttempts = 8
@@ -49,12 +49,6 @@ const connectDB = async (attempt = 1) => {
       }
     }
 
-    // listen only once, even if a later step throws and the retry loop runs again
-    if (!listening) {
-      const port = process.env.PORT || 5000
-      app.listen(port, () => console.log(`server listening on ${port}...`))
-      listening = true
-    }
     await startSlaChecker() // only after the DB connection is confirmed live; awaited so a problem here can't become an unhandled rejection
     await startWarrantyChecker()
     // the warranty cron only fires at 09:00 server time and Render's free tier

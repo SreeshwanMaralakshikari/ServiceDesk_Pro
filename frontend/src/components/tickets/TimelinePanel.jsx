@@ -1,5 +1,4 @@
 import { useFetch } from '../../hooks/useFetch.js'
-import { styles } from '../../styles/common.js'
 
 const KIND = {
   STATUS: { label: 'Status', dot: 'bg-indigo-400', box: 'bg-white border border-slate-200' },

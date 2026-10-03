@@ -6,17 +6,18 @@ import { verifyToken } from '../middlewares/verifyToken.js'
 import { loginLimiter, loginEmailLimiter, registerLimiter } from '../middlewares/rateLimiters.js'
 import { logAudit } from '../utils/logAudit.js'
 import { validateRoleDepartment } from '../utils/validateRoleDepartment.js'
+import { durationToMs } from '../utils/sessionRules.js'
 import { passwordProblem, MIN_NEW_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from '../utils/passwordRule.js'
 
 export const commonApp = exp.Router()
 
-const cookieOptions = () => ({
+const cookieBase = () => ({
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'lax',
-  maxAge: 24 * 60 * 60 * 1000, // 1 day, matches JWT_EXPIRES_IN default
+  sameSite: 'lax',
 })
-
+// the cookie lives exactly as long as the token
+const cookieOptions = () => ({ ...cookieBase(), maxAge: durationToMs(process.env.JWT_EXPIRES_IN) })
 
 // self-register: always EMPLOYEE, role/department never trusted from elsewhere
 commonApp.post('/users', registerLimiter, async (req, res, next) => {
@@ -92,8 +93,9 @@ commonApp.post('/login', loginLimiter, loginEmailLimiter, async (req, res, next)
   }
 })
 
-commonApp.get('/logout', (req, res) => {
-  res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' })
+// POST so a link or image on another site cannot sign the user out
+commonApp.post('/logout', (req, res) => {
+  res.clearCookie('token', cookieBase())
   //send res
   res.status(200).json({ message: 'logged out' })
 })
@@ -126,9 +128,10 @@ commonApp.put('/password', verifyToken('ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOY
       return res.status(401).json({ message: 'current password is incorrect' })
     }
     user.password = await bcrypt.hash(newPassword, 10)
+    user.passwordChangedAt = new Date()
     await user.save()
     await logAudit({ req, action: 'PASSWORD_CHANGED', entityType: 'USER', entity: user })
-    res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' })
+    res.clearCookie('token', cookieBase())
     //send res
     res.status(200).json({ message: 'password changed, please login again' })
   } catch (err) {

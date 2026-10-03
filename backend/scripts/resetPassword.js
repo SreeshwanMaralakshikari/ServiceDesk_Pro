@@ -22,6 +22,7 @@ if (!user) {
   process.exit(1)
 }
 user.password = await bcrypt.hash(password, 10)
+user.passwordChangedAt = new Date() // signs out every older session
 await user.save()
 console.log(`password reset for ${email} (${user.role})`)
 await mongoose.connection.close()

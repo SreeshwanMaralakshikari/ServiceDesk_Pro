@@ -121,10 +121,9 @@ kbApp.post('/articles', verifyToken(...WRITE_ROLES), async (req, res, next) => {
       //send res
       return res.status(400).json({ message: 'invalid category' })
     }
-    // generateSequentialId counts existing articles, so two simultaneous
-    // creates can pick the same number and one hits the unique index on
-    // publicId (E11000). Recounting picks the next free number, so retry a
-    // couple of times before treating it as a real conflict.
+    // the id comes from an atomic counter, so a clash on publicId should not
+    // happen; the retry only covers a counter that fell behind the data
+    // (for example after a database restore): the next try takes the next number
     let article
     for (let attempt = 1; ; attempt++) {
       try {

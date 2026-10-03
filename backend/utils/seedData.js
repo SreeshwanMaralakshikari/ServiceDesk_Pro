@@ -213,13 +213,15 @@ const ensureProductionAdmin = async () => {
 // idempotent top-up: every collection is ensured on its own natural key, so
 // it is safe to run on an empty database, a half-seeded one, or the live one.
 // (name kept because server.js and `npm run seed` import it.)
-export const seedIfEmpty = async () => {
+// extraDemoTickets: false keeps only the 40-ticket core table, which the dashboard and report tests pin their numbers to
+export const seedIfEmpty = async ({ extraDemoTickets = true } = {}) => {
   const isProduction = process.env.NODE_ENV === 'production'
   console.log('ensuring seed data...')
 
   const deptRows = [
     { name: 'Human Resources', code: 'HR', kind: 'BUSINESS' },
     { name: 'Engineering', code: 'ENG', kind: 'BUSINESS' },
+    { name: 'Finance', code: 'FIN', kind: 'BUSINESS' },
     { name: 'Service Desk', code: 'SVD', kind: 'IT_SUPPORT' },
     { name: 'Infrastructure', code: 'INF', kind: 'IT_SUPPORT' },
   ]
@@ -233,6 +235,12 @@ export const seedIfEmpty = async () => {
     { name: 'Software', department: depts.SVD._id, ticketType: 'INCIDENT', defaultPriority: 'MEDIUM', autoAssign: true, skills: ['software', 'outlook', 'office'] },
     { name: 'Network', department: depts.INF._id, ticketType: 'INCIDENT', defaultPriority: 'HIGH', skills: ['network', 'wifi', 'vpn'] },
     { name: 'New Hardware Request', department: depts.SVD._id, ticketType: 'SERVICE_REQUEST', defaultPriority: 'LOW', requiresApproval: true },
+    // the other five of the nine categories (HARDENING seed)
+    { name: 'Access & Accounts', department: depts.SVD._id, ticketType: 'INCIDENT', defaultPriority: 'MEDIUM', autoAssign: true, skills: ['software', 'office', 'outlook'] },
+    { name: 'Printing', department: depts.SVD._id, ticketType: 'INCIDENT', defaultPriority: 'LOW', autoAssign: true, skills: ['printer', 'hardware'] },
+    { name: 'New Software Request', department: depts.SVD._id, ticketType: 'SERVICE_REQUEST', defaultPriority: 'LOW', requiresApproval: true },
+    { name: 'Security', department: depts.INF._id, ticketType: 'INCIDENT', defaultPriority: 'HIGH', skills: ['network', 'firewall'] },
+    { name: 'Server & Storage', department: depts.INF._id, ticketType: 'INCIDENT', defaultPriority: 'HIGH', skills: ['network', 'firewall'] },
   ]
   for (const row of catRows) await ensure(CategoryModel, { name: row.name }, row)
 
@@ -270,6 +278,7 @@ export const seedIfEmpty = async () => {
   await user({ firstName: 'Nia', lastName: 'Network', email: 'nia@sdp.test', role: 'TECHNICIAN', department: depts.INF._id, skills: ['network', 'wifi', 'firewall'] })
   await user({ firstName: 'Hana', lastName: 'Employee', email: 'hana@sdp.test', role: 'EMPLOYEE', department: depts.HR._id })
   await user({ firstName: 'Omar', lastName: 'Employee', email: 'omar@sdp.test', role: 'EMPLOYEE', department: depts.ENG._id })
+  await user({ firstName: 'Fay', lastName: 'Employee', email: 'fay@sdp.test', role: 'EMPLOYEE', department: depts.FIN._id })
   if (!depts.INF.manager) await DepartmentModel.findByIdAndUpdate(depts.INF._id, { manager: ian._id })
   await UserModel.updateOne({ _id: tech._id, skills: { $exists: false } }, { $set: { skills: ['hardware', 'laptop', 'printer'] } })
   const dsaCategories = [
@@ -341,14 +350,14 @@ export const seedIfEmpty = async () => {
   // back-dated demo tickets (with CSAT and work logs) so the dashboards have something to show.
   // Wrapped like the KB top-up: a problem here must never stop the server from starting
   try {
-    const demo = await ensureDemoTickets()
+    const demo = await ensureDemoTickets({ extra: extraDemoTickets })
     console.log(demo.skipped ? `demo tickets skipped: ${demo.skipped}` : `demo tickets: ${demo.created} created, ${demo.existing} already there, ${demo.workLogs} work logs`)
   } catch (err) {
     console.log('demo tickets failed (non-fatal):', err.message)
   }
 
   console.log(`seed complete. demo logins (password: ${demoPassword === 'Passw0rd!' ? 'Passw0rd!' : 'the SEED_DEMO_PASSWORD you set'}):`)
-  console.log('  admin@sdp.test / manager@sdp.test / ian@sdp.test (Infrastructure manager) / tech@sdp.test / employee@sdp.test / assets@sdp.test')
+  console.log('  admin@sdp.test / manager@sdp.test / ian@sdp.test (Infrastructure manager) / tech@sdp.test / employee@sdp.test / assets@sdp.test (also hana, omar, fay as employees)')
 }
 
 // allow `npm run seed` to run this directly

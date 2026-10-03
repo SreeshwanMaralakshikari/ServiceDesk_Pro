@@ -22,7 +22,7 @@ export const downloadCsv = async (url, params, fallbackName) => {
         const body = JSON.parse(await err.response.data.text())
         message = body.error || body.message || ''
       } catch { /* not JSON, fall through */ }
-      if (message) throw new Error(message)
+      if (message) throw new Error(message, { cause: err })
     }
     throw err
   }

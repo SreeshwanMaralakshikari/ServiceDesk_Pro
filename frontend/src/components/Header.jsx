@@ -9,16 +9,21 @@ export const Header = () => {
   const navigate = useNavigate()
 
   const handleLogout = async () => {
-    await logout()
-    toast.success('Logged out')
+    try {
+      await logout()
+      toast.success('Logged out')
+    } catch {
+      // the session is cleared locally either way; the cookie expires on its own
+      toast.error('Could not reach the server, you were signed out on this device')
+    }
     navigate('/login')
   }
 
   return (
     <header className="sticky top-0 z-10 bg-white border-b border-slate-200">
-      <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
-        <Link to="/" className="font-semibold text-indigo-600">ServiceDesk Pro</Link>
-        <nav className="flex items-center gap-4">
+      <div className="max-w-7xl mx-auto px-4 min-h-14 py-2 flex items-center justify-between gap-4">
+        <Link to="/" className="font-semibold text-indigo-600 whitespace-nowrap">ServiceDesk Pro</Link>
+        <nav className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1">
           {isAuthenticated ? (
             <>
               {user?.role !== 'ASSET_MANAGER' && <Link to="/tickets" className={styles.navLink}>My Tickets</Link>}
@@ -34,7 +39,7 @@ export const Header = () => {
               {(user?.role === 'ASSET_MANAGER' || user?.role === 'ADMIN') && <Link to="/vendors" className={styles.navLink}>Vendors</Link>}
               {user?.role === 'ADMIN' && <Link to="/admin" className={styles.navLink}>Admin</Link>}
               <NotificationBell />
-              <Link to="/account/password" className="text-sm text-slate-400 hover:text-indigo-600" title="Change password">{user?.firstName} · {user?.role}</Link>
+              <Link to="/account/password" className="text-sm text-slate-400 hover:text-indigo-600 whitespace-nowrap" title="Change password">{user?.firstName} · {user?.role}</Link>
               <button onClick={handleLogout} className={styles.btnSecondary}>Logout</button>
             </>
           ) : (

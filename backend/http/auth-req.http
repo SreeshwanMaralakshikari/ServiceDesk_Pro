@@ -25,7 +25,10 @@ Content-Type: application/json
 ### check-auth (cookie sent automatically by the REST client)
 GET {{baseUrl}}/auth/check-auth
 
-### logout
+### logout (POST; the old GET /auth/logout is now 404)
+POST {{baseUrl}}/auth/logout
+
+### logout with GET -> 404 (it was a GET before HARDENING)
 GET {{baseUrl}}/auth/logout
 
 ### register is rate limited: more than 10/hour per IP -> 429
@@ -64,3 +67,31 @@ Content-Type: application/json
 
 ### the same account is also limited per email: 20 wrong passwords in 15 minutes -> 429
 ### (even from different IP addresses), on top of the 10-per-IP limit above
+
+### HARDENING: malformed JSON -> 400 {"error":"invalid JSON body"} (it used to be a 500)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{"email": 
+
+### HARDENING: registering an email that already exists -> 409 "email already exists" (the address itself is not echoed back)
+POST {{baseUrl}}/auth/users
+Content-Type: application/json
+
+{
+  "firstName": "Dup",
+  "email": "employee@sdp.test",
+  "password": "A-long-password-123",
+  "department": "PASTE_ENG_DEPARTMENT_ID"
+}
+
+### HARDENING: an unknown id in a path -> 400 "invalid id" (not 500)
+GET {{baseUrl}}/ticket-api/tickets/not-a-valid-id
+
+### HARDENING: sessions
+# 1. log in twice (two REST client windows, or one browser + one REST client)
+# 2. in one of them: PUT /auth/password with a valid new password -> 200
+# 3. in the OTHER one: GET /auth/check-auth -> 401 "Session expired, please login again"
+# 4. log in again with the new password -> 200 and check-auth works
+# (tokens carry whole seconds, so wait a second between step 1 and step 2)
+# The auth cookie now lives as long as JWT_EXPIRES_IN (default 1d): look at Max-Age in the Set-Cookie of the login response

@@ -6,6 +6,7 @@ import { verifyToken } from '../middlewares/verifyToken.js'
 import { generateSequentialId } from '../utils/generateSequentialId.js'
 import { idOrPublicIdFilter } from '../utils/findByIdOrPublicId.js'
 import { ASSET_TRANSITIONS, isAssetTransitionAllowed } from '../utils/assetTransitions.js'
+import { runAtomically } from '../utils/runAtomically.js'
 import { atomicTransition, isValidVersion, VERSION_REQUIRED_MESSAGE } from '../utils/atomicTransition.js'
 import { getPagination, toPage } from '../utils/pagination.js'
 import { asText } from '../utils/queryParams.js'
@@ -197,7 +198,9 @@ assetApp.get('/assets/:assetId/history', verifyToken(...READ_ROLES), async (req,
 })
 
 // tickets referencing this asset — Asset Manager has no general ticket
-// access, so this is deliberately public-fields-only
+// access, so this is deliberately public-fields-only. A technician only sees
+// the tickets of their own team (the same scope as the ticket list); the Asset
+// Manager and Admin see every team's, titles only.
 assetApp.get('/assets/:assetId/tickets', verifyToken(...READ_ROLES), async (req, res, next) => {
   try {
     const asset = await AssetModel.findOne({ ...idOrPublicIdFilter(req.params.assetId), isDeleted: false }).select('_id')
@@ -205,7 +208,9 @@ assetApp.get('/assets/:assetId/tickets', verifyToken(...READ_ROLES), async (req,
       //send res
       return res.status(404).json({ message: 'asset not found' })
     }
-    const tickets = await TicketModel.find({ relatedAsset: asset._id, isDeleted: false })
+    const filter = { relatedAsset: asset._id, isDeleted: false }
+    if (req.user.role === 'TECHNICIAN') filter.department = req.user.department ?? null // no team -> matches nothing
+    const tickets = await TicketModel.find(filter)
       .select('publicId title status priority createdAt')
       .sort({ createdAt: -1 })
     //send res
@@ -216,8 +221,9 @@ assetApp.get('/assets/:assetId/tickets', verifyToken(...READ_ROLES), async (req,
 // replace — its own two-asset operation, registered before the generic
 // :action route below (same lesson as the ticket priority-route collision:
 // specific literal paths must come first). Each write is atomic and
-// version-guarded; the pair is still not one transaction, so if the second
-// write fails the first is undone by hand (transaction version: HARDENING).
+// version-guarded, and the pair runs in one transaction (runAtomically), so on
+// Atlas either both assets change or neither does. Where transactions are not
+// available (a standalone local mongod) the first write is undone by hand.
 assetApp.patch('/assets/:assetId/replace', verifyToken(...MANAGE_ROLES), async (req, res, next) => {
   try {
     const { newAssetId, note, version } = req.body ?? {}
@@ -256,36 +262,42 @@ assetApp.patch('/assets/:assetId/replace', verifyToken(...MANAGE_ROLES), async (
     const oldFromStatus = oldAsset.status // capture before writing — spec allows ASSIGNED *or* IN_REPAIR here
     const now = new Date()
 
-    const first = await atomicTransition({
-      Model: AssetModel, doc: oldAsset, action: 'replace', noun: 'asset', from: ['ASSIGNED', 'IN_REPAIR'], version,
-      set: { status: 'REPLACED', replacedBy: newAsset._id },
-      push: { lifecycleHistory: { fromStatus: oldFromStatus, toStatus: 'REPLACED', by: req.user.id, note, at: now } },
-    })
-    if (first.error) {
-      //send res
-      return res.status(first.error.status).json({ message: first.error.message })
-    }
-
-    let second
-    try {
-      second = await atomicTransition({
-        Model: AssetModel, doc: newAsset, action: 'be used as a replacement while', noun: 'asset', from: ['IN_STOCK'], version: newAsset.version,
-        set: { status: 'ASSIGNED', assignedTo: assignee, replaces: oldAsset._id },
-        push: { lifecycleHistory: { fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', by: req.user.id, note: note || `replacing ${oldAsset.publicId}`, at: now } },
+    const outcome = await runAtomically(async (session) => {
+      const first = await atomicTransition({
+        Model: AssetModel, doc: oldAsset, action: 'replace', noun: 'asset', from: ['ASSIGNED', 'IN_REPAIR'], version, session,
+        set: { status: 'REPLACED', replacedBy: newAsset._id },
+        push: { lifecycleHistory: { fromStatus: oldFromStatus, toStatus: 'REPLACED', by: req.user.id, note, at: now } },
       })
-    } catch (innerErr) {
-      second = { error: { status: 500, thrown: innerErr } }
-    }
-    if (second.error) {
-      // undo the first write so we never end up with an orphaned REPLACED asset
-      await AssetModel.updateOne(
-        { _id: oldAsset._id, version: first.doc.version },
-        { $set: { status: oldFromStatus }, $unset: { replacedBy: '' }, $pop: { lifecycleHistory: 1 }, $inc: { version: -1 } },
-      )
-      if (second.error.thrown) throw second.error.thrown
+      if (first.error) return { error: first.error }
+
+      let second
+      try {
+        second = await atomicTransition({
+          Model: AssetModel, doc: newAsset, action: 'be used as a replacement while', noun: 'asset', from: ['IN_STOCK'], version: newAsset.version, session,
+          set: { status: 'ASSIGNED', assignedTo: assignee, replaces: oldAsset._id },
+          push: { lifecycleHistory: { fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', by: req.user.id, note: note || `replacing ${oldAsset.publicId}`, at: now } },
+        })
+      } catch (innerErr) {
+        second = { error: { status: 500, thrown: innerErr } }
+      }
+      if (second.error) {
+        // inside a transaction the rollback undoes the first write; without one, undo it by hand
+        if (!session) {
+          await AssetModel.updateOne(
+            { _id: oldAsset._id, version: first.doc.version },
+            { $set: { status: oldFromStatus }, $unset: { replacedBy: '' }, $pop: { lifecycleHistory: 1 }, $inc: { version: -1 } },
+          )
+        }
+        return { error: second.error }
+      }
+      return { first, second }
+    })
+    if (outcome.error) {
+      if (outcome.error.thrown) throw outcome.error.thrown
       //send res
-      return res.status(second.error.status).json({ message: second.error.message })
+      return res.status(outcome.error.status).json({ message: outcome.error.message })
     }
+    const { first, second } = outcome
 
     await logAudit({ req, action: 'ASSET_REPLACE', entityType: 'ASSET', entity: oldAsset, before: { status: oldFromStatus }, after: { replacedBy: newAsset.publicId } })
     await createNotification({ user: assignee, type: 'ASSET_ASSIGNED', message: `Your asset ${oldAsset.publicId} was replaced with ${newAsset.publicId}`, link: '/my-assets' })

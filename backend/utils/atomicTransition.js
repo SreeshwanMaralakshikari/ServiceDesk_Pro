@@ -6,8 +6,11 @@
 // A null result is re-read to explain why: 404 gone, 409 someone else changed
 // it, 400 the status does not allow the action.
 //
+// Pass `session` to run the write inside a transaction (see runAtomically.js).
+//
 // Returns { doc } on success or { error: { status, message } }.
-export const atomicTransition = async ({ Model, doc, action, noun, from, version, set = {}, unset = {}, push = {}, inc = {} }) => {
+export const atomicTransition = async ({ Model, doc, action, noun, from, version, set = {}, unset = {}, push = {}, inc = {}, session }) => {
+  const sessionOpt = session ? { session } : {}
   const update = { $inc: { version: 1, ...inc } }
   if (Object.keys(set).length) update.$set = set
   if (Object.keys(unset).length) update.$unset = unset
@@ -16,11 +19,11 @@ export const atomicTransition = async ({ Model, doc, action, noun, from, version
   const updated = await Model.findOneAndUpdate(
     { _id: doc._id, isDeleted: false, status: { $in: from }, version },
     update,
-    { returnDocument: 'after', runValidators: true },
+    { returnDocument: 'after', runValidators: true, ...sessionOpt },
   )
   if (updated) return { doc: updated }
 
-  const current = await Model.findOne({ _id: doc._id }).select('status version isDeleted')
+  const current = await Model.findOne({ _id: doc._id }, null, sessionOpt).select('status version isDeleted')
   if (!current || current.isDeleted) return { error: { status: 404, message: `${noun} not found` } }
   // a stale version wins over a status mismatch: the caller is looking at old
   // data either way, and 409 tells the client to refresh

@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken'
 import { config } from 'dotenv'
 import { UserModel } from '../models/UserModel.js'
+import { tokenIsStale } from '../utils/sessionRules.js'
 
 const { verify } = jwt
 config()
@@ -20,10 +21,15 @@ export const verifyToken = (...allowedRoles) => {
 
       // always trust the DB for role/department/active state, not the token's
       // copy, so an admin's edit takes effect immediately
-      const user = await UserModel.findById(decoded.id).select('role department isActive')
+      const user = await UserModel.findById(decoded.id).select('role department isActive passwordChangedAt')
       if (!user || !user.isActive) {
         //send res
         return res.status(401).json({ message: 'Account not found or deactivated' })
+      }
+      // a password change or reset signs out every older session
+      if (tokenIsStale(decoded.iat, user.passwordChangedAt)) {
+        //send res
+        return res.status(401).json({ message: 'Session expired, please login again' })
       }
       if (allowedRoles.length && !allowedRoles.includes(user.role)) {
         //send res

@@ -51,9 +51,10 @@ const USERS = {
 const CAT_ID = oid(100)
 
 describe('real server.js + KB (only DB/cron stubbed)', () => {
-  let base, origin, store, seq, K, C, U
+  let base, origin, store, seq, K, C, U, Counter
   const saved = {}
   let dupKeyFailuresLeft = 0
+  const counters = {}
 
   const snap = (d) => JSON.parse(JSON.stringify(d))
   const castCheck = (fn, model, filter) => { const q = fn.call(model, filter); q._castConditions(); if (q.error()) throw q.error() }
@@ -96,7 +97,7 @@ describe('real server.js + KB (only DB/cron stubbed)', () => {
     let json = null; try { json = await res.json() } catch { /* no body */ }
     return { status: res.status, body: json, headers: res.headers }
   }
-  const reset = () => { store = []; seq = 0; dupKeyFailuresLeft = 0 }
+  const reset = () => { store = []; seq = 0; dupKeyFailuresLeft = 0; for (const k of Object.keys(counters)) delete counters[k] }
 
   before(async () => {
     await import('../server.js') // the real thing
@@ -111,6 +112,10 @@ describe('real server.js + KB (only DB/cron stubbed)', () => {
     ;(await import('../models/AuditLogModel.js')).AuditLogModel.create = async () => ({}) // no database here
     saved.K = { findOneAndUpdate: K.findOneAndUpdate, find: K.find, findOne: K.findOne, countDocuments: K.countDocuments, updateOne: K.updateOne, create: K.create }
     saved.C = { findOne: C.findOne }; saved.U = { findById: U.findById }
+    Counter = (await import('../models/CounterModel.js')).CounterModel
+    saved.Counter = { findOneAndUpdate: Counter.findOneAndUpdate }
+    // the public-id counter, in memory (no database here)
+    Counter.findOneAndUpdate = async (f) => { counters[f._id] = (counters[f._id] ?? 0) + 1; return { seq: counters[f._id] } }
 
     U.findById = (id) => lazy(() => { const u = Object.values(USERS).find((x) => x._id === String(id)); return u && { ...u, isActive: true } })
     C.findOne = (f) => lazy(() => { castCheck(saved.C.findOne, C, f); return String(f._id) === CAT_ID ? { _id: CAT_ID } : null })
@@ -134,7 +139,7 @@ describe('real server.js + KB (only DB/cron stubbed)', () => {
     }
   })
   after(() => {
-    Object.assign(K, saved.K); Object.assign(C, saved.C); Object.assign(U, saved.U)
+    Object.assign(K, saved.K); Object.assign(C, saved.C); Object.assign(U, saved.U); Object.assign(Counter, saved.Counter)
     serverRef.close()
   })
 

@@ -21,6 +21,7 @@ import { applyUpdate } from '../testkit/applyUpdate.js'
 import { KnowledgeArticleModel } from '../models/KnowledgeArticleModel.js'
 import { CategoryModel } from '../models/CategoryModel.js'
 import { UserModel } from '../models/UserModel.js'
+import { CounterModel } from '../models/CounterModel.js'
 import { AuditLogModel } from '../models/AuditLogModel.js'
 import { isKbTransitionAllowed, KB_TRANSITIONS } from '../utils/kbTransitions.js'
 import { buildKbQuery } from '../utils/buildKbQuery.js'
@@ -237,8 +238,12 @@ describe('KB routes over HTTP (stubbed models)', () => {
       ['kb', KnowledgeArticleModel, ['findOne', 'findOneAndUpdate', 'find', 'countDocuments', 'updateOne', 'create']],
       ['cat', CategoryModel, ['findOne']],
       ['user', UserModel, ['findById']],
+      ['counter', CounterModel, ['findOneAndUpdate']],
     ]) { originals[k] = {}; for (const n of names) originals[k][n] = obj[n] }
 
+    // the public-id counter, as an in-memory counter per key
+    const counters = {}
+    CounterModel.findOneAndUpdate = async (f) => { counters[f._id] = (counters[f._id] ?? 0) + 1; return { seq: counters[f._id] } }
     UserModel.findById = (id) => chain(Object.values(USERS).find((u) => u._id === String(id)) && { ...Object.values(USERS).find((u) => u._id === String(id)), isActive: true })
     CategoryModel.findOne = (f) => chain(String(f._id) === CAT_ID ? { _id: CAT_ID } : null)
     // like real Mongoose, hand back a separate hydrated copy, not the stored object itself
@@ -275,7 +280,7 @@ describe('KB routes over HTTP (stubbed models)', () => {
   })
   after(() => {
     server.close()
-    for (const [k, obj] of [['kb', KnowledgeArticleModel], ['cat', CategoryModel], ['user', UserModel]]) Object.assign(obj, originals[k])
+    for (const [k, obj] of [['kb', KnowledgeArticleModel], ['cat', CategoryModel], ['user', UserModel], ['counter', CounterModel]]) Object.assign(obj, originals[k])
   })
   const reset = () => { store = []; seq = 0 }
 

@@ -212,8 +212,13 @@ ticketApp.get('/tickets/:ticketId', verifyToken(...ALL_ROLES), async (req, res, 
     }
 
     // lazy SLA check — a single ticket is cheap enough to await before
-    // responding, so the badge the caller sees is already up to date
-    await evaluateTicketSla(ticket).catch((err) => console.log('lazy SLA check (detail) failed:', err.message))
+    // responding, and what it changed is applied to the ticket we are about to
+    // serialise, so the flags the caller sees are the up-to-date ones
+    const slaChanges = await evaluateTicketSla(ticket).catch((err) => {
+      console.log('lazy SLA check (detail) failed:', err.message)
+      return {}
+    })
+    for (const [field, value] of Object.entries(slaChanges ?? {})) ticket.set(`sla.${field}`, value)
 
     //send res
     res.status(200).json({ message: 'ticket fetched', payload: toTicketView(ticket, req.user) })

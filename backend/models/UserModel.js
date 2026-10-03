@@ -10,6 +10,7 @@ const userSchema = new Schema({
   skills:      { type: [String], default: [] }, // technician tags, used by auto-assign
   isActive:    { type: Boolean, default: true },
   profileImageUrl: { type: String },
+  passwordChangedAt: { type: Date }, // tokens issued before this are rejected
 }, {
   versionKey: false,
   timestamps: true,

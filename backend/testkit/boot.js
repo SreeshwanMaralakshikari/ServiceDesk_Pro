@@ -4,7 +4,7 @@
 import mongoose from 'mongoose'
 import bcrypt from 'bcryptjs'
 import request from 'supertest'
-import { MongoMemoryServer } from 'mongodb-memory-server'
+import { MongoMemoryServer, MongoMemoryReplSet } from 'mongodb-memory-server'
 
 export const PASSWORD = 'Passw0rd!'
 
@@ -17,6 +17,10 @@ export const bootApp = async (envOverrides = {}, { fixtures = true } = {}) => {
     CLIENT_URL: 'http://localhost:5173',
     MONGO_URI: 'mongodb://unused.invalid/ignored',
     GROQ_API_KEY: '', // never call the real AI from a test
+    // the tests log in with the default demo password: a SEED_DEMO_PASSWORD / SEED_ADMIN_* left in your shell or .env must not leak in
+    SEED_DEMO_PASSWORD: '',
+    SEED_ADMIN_PASSWORD: '',
+    SEED_ADMIN_EMAIL: '',
     ...envOverrides,
   })
 
@@ -24,7 +28,8 @@ export const bootApp = async (envOverrides = {}, { fixtures = true } = {}) => {
   // a local mongod) instead of downloading one; each test process gets its own
   // throwaway database there
   const external = process.env.TEST_MONGO_URI
-  const mongod = external ? null : await MongoMemoryServer.create()
+  // TEST_REPLSET=1 starts a one-node replica set instead, so transactions can be tested (like Atlas)
+  const mongod = external ? null : process.env.TEST_REPLSET === '1' ? await MongoMemoryReplSet.create({ replSet: { count: 1 }, instanceOpts: [{ launchTimeout: 60000 }] }) : await MongoMemoryServer.create({ instance: { launchTimeout: 60000 } })
   await mongoose.connect(external ?? mongod.getUri(), { dbName: external ? `sdp_it_${process.pid}_${Date.now()}` : 'sdp_integration' })
 
   const { app } = await import('../app.js')

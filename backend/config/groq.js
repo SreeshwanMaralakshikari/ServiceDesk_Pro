@@ -51,7 +51,7 @@ export const groqClient = {
       if (!content || typeof content !== 'string') throw new Error('AI returned an empty response')
       return content
     } catch (err) {
-      if (err.name === 'AbortError') throw new Error('AI request timed out')
+      if (err.name === 'AbortError') throw new Error('AI request timed out', { cause: err })
       throw err
     } finally {
       clearTimeout(timeout)

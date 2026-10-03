@@ -83,10 +83,49 @@ export const DEMO_TICKET_SPECS = [
   { title: 'Need a spare charger', cat: 'Hardware', pri: 'LOW', req: 'omar', status: 'CANCELLED', ageH: 144 },
 ]
 
+// 20 more tickets for the second half of the demo (HARDENING seed): the five newer categories, a Finance requester,
+// and older tickets so the 90-day window shows more than the 30-day one. They are kept apart from the table above
+// on purpose: the dashboard and report tests pin their numbers to the 40-ticket table, and call the seed with
+// { extraDemoTickets: false } to keep working from it.
+export const EXTRA_DEMO_TICKET_SPECS = [
+  // closed after the requester confirmed (8)
+  { title: 'Reset my account lockout', cat: 'Access & Accounts', pri: 'MEDIUM', req: 'fay', tech: 'tara', status: 'CLOSED', ageH: 1500, respH: 1, resolveH: 5, csat: 5 },
+  { title: 'Request access to the finance share', cat: 'Access & Accounts', pri: 'HIGH', req: 'fay', tech: 'theo', status: 'CLOSED', ageH: 500, respH: 2, resolveH: 7, csat: 4 },
+  { title: 'MFA app lost after a phone change', cat: 'Access & Accounts', pri: 'HIGH', req: 'eli', tech: 'tara', status: 'CLOSED', ageH: 960, respH: 3, resolveH: 12, csat: 2 }, // resolved late (8h allowed)
+  { title: 'Printer queue stuck on floor 3', cat: 'Printing', pri: 'LOW', req: 'hana', tech: 'ravi', status: 'CLOSED', ageH: 700, respH: 6, resolveH: 40, csat: 4 },
+  { title: 'Scanner will not email documents', cat: 'Printing', pri: 'MEDIUM', req: 'fay', tech: 'theo', status: 'CLOSED', ageH: 250, respH: 2, resolveH: 18, csat: 5 },
+  { title: 'Suspicious email reported by finance', cat: 'Security', pri: 'HIGH', req: 'fay', tech: 'nia', status: 'CLOSED', ageH: 300, respH: 1, resolveH: 6, csat: 5 },
+  { title: 'Backup job failed on the shared drive', cat: 'Server & Storage', pri: 'HIGH', req: 'omar', tech: 'noor', status: 'CLOSED', ageH: 1800, respH: 2, resolveH: 9, csat: 3 }, // resolved late
+  { title: 'New software: accounting plug-in', cat: 'New Software Request', pri: 'LOW', req: 'fay', tech: 'ravi', status: 'CLOSED', ageH: 400, respH: 5, resolveH: 50, csat: 4 },
+
+  // resolved, waiting for the requester to confirm (2)
+  { title: 'Cannot log in to the HR portal', cat: 'Access & Accounts', pri: 'MEDIUM', req: 'hana', tech: 'tara', status: 'RESOLVED', ageH: 36, respH: 2, resolveH: 14 },
+  { title: 'Disk almost full on the file server', cat: 'Server & Storage', pri: 'CRITICAL', req: 'omar', tech: 'noor', status: 'RESOLVED', ageH: 20, respH: 0.5, resolveH: 3.5 },
+
+  // in progress (3)
+  { title: 'Printer shows a low toner warning', cat: 'Printing', pri: 'LOW', req: 'fay', tech: 'ravi', status: 'IN_PROGRESS', ageH: 6, respH: 2 },
+  { title: 'Phishing link clicked by a colleague', cat: 'Security', pri: 'CRITICAL', req: 'hana', tech: 'nia', status: 'IN_PROGRESS', ageH: 3, respH: 0.5 },
+  { title: 'Shared mailbox permissions are wrong', cat: 'Access & Accounts', pri: 'MEDIUM', req: 'eli', tech: 'theo', status: 'IN_PROGRESS', ageH: 22, respH: 3 }, // at risk
+
+  // assigned, not started (2)
+  { title: 'Security camera feed is offline', cat: 'Security', pri: 'MEDIUM', req: 'omar', tech: 'nia', status: 'ASSIGNED', ageH: 12 }, // reply overdue
+  { title: 'Move my mailbox to the new laptop', cat: 'Access & Accounts', pri: 'LOW', req: 'fay', tech: 'tara', status: 'ASSIGNED', ageH: 4 },
+
+  // open (2)
+  { title: 'Storage quota reached on the shared drive', cat: 'Server & Storage', pri: 'MEDIUM', req: 'hana', status: 'OPEN', ageH: 9 }, // reply overdue
+  { title: 'Scan to folder is not working', cat: 'Printing', pri: 'LOW', req: 'omar', status: 'OPEN', ageH: 2 },
+
+  // on hold, waiting for approval, cancelled (3)
+  { title: 'Server certificate renewal', cat: 'Server & Storage', pri: 'HIGH', req: 'fay', tech: 'noor', status: 'ON_HOLD', ageH: 40, respH: 3, holdAgoH: 12 },
+  { title: 'New software: design tool licences', cat: 'New Software Request', pri: 'LOW', req: 'omar', status: 'PENDING_APPROVAL', ageH: 14 },
+  { title: 'Duplicate request for a headset', cat: 'Hardware', pri: 'LOW', req: 'fay', status: 'CANCELLED', ageH: 90 },
+]
+
 export const DEMO_EMAILS = {
   eli: 'employee@sdp.test',
   hana: 'hana@sdp.test',
   omar: 'omar@sdp.test',
+  fay: 'fay@sdp.test',
   theo: 'tech@sdp.test',
   tara: 'tara@sdp.test',
   ravi: 'ravi@sdp.test',
@@ -270,7 +309,7 @@ export const buildDemoTicket = (spec, index, { now, publicId, users, category, p
 
 // adds whatever demo tickets are missing. Returns { created, existing, workLogs }; or { skipped } when the
 // base seed (people, categories, SLA policies) is not there yet
-export const ensureDemoTickets = async ({ now = new Date() } = {}) => {
+export const ensureDemoTickets = async ({ now = new Date(), extra = true } = {}) => {
   const emails = Object.values(DEMO_EMAILS)
   const found = await UserModel.find({ email: { $in: emails } })
   const users = {}
@@ -278,7 +317,9 @@ export const ensureDemoTickets = async ({ now = new Date() } = {}) => {
   const missingUser = Object.entries(users).find(([, u]) => !u)
   if (missingUser) return { skipped: `demo user ${DEMO_EMAILS[missingUser[0]]} is missing` }
 
-  const categoryRows = await CategoryModel.find({ name: { $in: ['Hardware', 'Software', 'Network', 'New Hardware Request'] } })
+  const specs = extra ? [...DEMO_TICKET_SPECS, ...EXTRA_DEMO_TICKET_SPECS] : DEMO_TICKET_SPECS
+  const usedCategories = [...new Set(specs.map((spec) => spec.cat))]
+  const categoryRows = await CategoryModel.find({ name: { $in: usedCategories } })
   const policyRows = await SLAPolicyModel.find({ priority: { $in: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] } })
   const categories = {}
   for (const row of categoryRows) {
@@ -287,10 +328,10 @@ export const ensureDemoTickets = async ({ now = new Date() } = {}) => {
     categories[row.name] = Object.assign(row.toObject(), { managerKey })
   }
   const policies = Object.fromEntries(policyRows.map((p) => [p.priority, p]))
-  if (Object.keys(categories).length < 4 || Object.keys(policies).length < 4) return { skipped: 'categories or SLA policies are missing' }
+  if (Object.keys(categories).length < usedCategories.length || Object.keys(policies).length < 4) return { skipped: 'categories or SLA policies are missing' }
 
   // oldest first, so the ticket numbers grow with time
-  const ordered = [...DEMO_TICKET_SPECS].sort((a, b) => b.ageH - a.ageH)
+  const ordered = [...specs].sort((a, b) => b.ageH - a.ageH)
   const result = { created: 0, existing: 0, workLogs: 0 }
   for (const [index, spec] of ordered.entries()) {
     const requester = users[spec.req]

@@ -155,3 +155,18 @@ GET {{baseUrl}}/asset-api/assets?limit=0&page=-3
 
 ### array/object filters are ignored, not turned into a Mongo operator
 GET {{baseUrl}}/asset-api/assets?status[$ne]=RETIRED&type[]=HARDWARE
+
+### HARDENING: replace runs as one transaction on Atlas (a replica set): both assets change or neither does
+# negative cases, each must leave BOTH assets unchanged:
+#   replacement not IN_STOCK -> 400 "the replacement asset must be IN_STOCK"
+#   stale version            -> 409 "asset was updated by someone else, please refresh"
+#   unknown replacement id   -> 404 "replacement asset not found"
+#   no version in the body   -> 400
+#   called as an employee    -> 403
+PATCH {{baseUrl}}/asset-api/assets/PASTE_OLD_ASSET_ID/replace
+Content-Type: application/json
+
+{ "newAssetId": "PASTE_PROCURED_ASSET_ID", "version": 0 }
+
+### HARDENING: the tickets related to an asset: a TECHNICIAN sees only their own team's tickets, ASSET_MANAGER / ADMIN see all teams'
+GET {{baseUrl}}/asset-api/assets/PASTE_ASSET_ID/tickets

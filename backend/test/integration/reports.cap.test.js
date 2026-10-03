@@ -9,7 +9,7 @@ describe('row cap (real database, cap lowered to 10)', () => {
   before(async () => {
     ctx = await bootApp({ REPORT_ROW_CAP: '10' }, { fixtures: false })
     const { seedIfEmpty } = await import('../../utils/seedData.js')
-    await seedIfEmpty()
+    await seedIfEmpty({ extraDemoTickets: false })
     admin = await loginAs(ctx.app, 'admin@sdp.test')
   })
   after(() => ctx.stop())

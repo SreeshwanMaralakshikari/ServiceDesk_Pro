@@ -19,6 +19,7 @@ import { techApp } from './APIs/TechAPI.js'
 import { managerApp } from './APIs/ManagerAPI.js'
 import { reportApp } from './APIs/ReportAPI.js'
 import { sanitizeBody } from './middlewares/sanitize.js'
+import { errorHandler } from './middlewares/errorHandler.js'
 import { cronStatus } from './jobs/status.js'
 
 // the express app without any connection or listener, so tests can mount it
@@ -30,8 +31,11 @@ export const app = exp()
 const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS, 10)
 app.set('trust proxy', Number.isInteger(trustProxyHops) && trustProxyHops >= 0 ? trustProxyHops : 1)
 app.use(helmet())
+// the Vite dev servers are only allowed outside production
+const allowedOrigins = [process.env.CLIENT_URL]
+if (process.env.NODE_ENV !== 'production') allowedOrigins.push('http://localhost:5173', 'http://localhost:5174')
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', process.env.CLIENT_URL],
+  origin: allowedOrigins,
   credentials: true,
 }))
 app.use(exp.json({ limit: '1mb' }))
@@ -74,41 +78,4 @@ app.use((req, res) => {
 })
 
 // global error handler
-app.use((err, req, res, next) => {
-  console.log('Error name:', err.name)
-  console.log('Full error:', err.message)
-
-  if (err.name === 'ValidationError') {
-    //send res
-    return res.status(400).json({ message: 'error occurred', error: err.message })
-  }
-  if (err.name === 'CastError') {
-    //send res
-    return res.status(400).json({ message: 'error occurred', error: 'invalid id' })
-  }
-
-  // body-parser errors: bad JSON / too-large body are client mistakes, not server faults
-  if (err.type === 'entity.parse.failed') {
-    //send res
-    return res.status(400).json({ message: 'error occurred', error: 'invalid JSON body' })
-  }
-  if (err.type === 'entity.too.large') {
-    //send res
-    return res.status(413).json({ message: 'error occurred', error: 'request body too large' })
-  }
-
-  const errCode = err.code ?? err.cause?.code
-  const keyValue = err.keyValue ?? err.cause?.keyValue
-  if (errCode === 11000) {
-    if (keyValue) {
-      const field = Object.keys(keyValue)[0]
-      //send res
-      return res.status(409).json({ message: 'error occurred', error: `${field} "${keyValue[field]}" already exists` })
-    }
-    //send res
-    return res.status(409).json({ message: 'error occurred', error: 'duplicate key error' })
-  }
-
-  //send res
-  res.status(500).json({ message: 'error occurred', error: 'server side error' })
-})
+app.use(errorHandler)

@@ -12,7 +12,7 @@ describe('dashboards on the seeded demo data (real database)', () => {
   before(async () => {
     ctx = await bootApp({}, { fixtures: false })
     const { seedIfEmpty } = await import('../../utils/seedData.js')
-    await seedIfEmpty()
+    await seedIfEmpty({ extraDemoTickets: false })
     const { DepartmentModel } = await import('../../models/DepartmentModel.js')
     infId = String((await DepartmentModel.findOne({ code: 'INF' }))._id)
     ;[admin, mia, ian, theo, emp, assets] = await Promise.all(

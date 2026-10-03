@@ -19,6 +19,7 @@ const { SLAPolicyModel } = await load(base + 'models/SLAPolicyModel.js')
 const { VendorModel } = await load(base + 'models/VendorModel.js')
 const { AssetModel } = await load(base + 'models/AssetModel.js')
 const { KnowledgeArticleModel } = await load(base + 'models/KnowledgeArticleModel.js')
+const { CounterModel } = await load(base + 'models/CounterModel.js')
 const { seedIfEmpty, seedKnowledgeBaseIfEmpty } = await load(base + 'utils/seedData.js')
 
 const withId = (d) => ({ _id: new Types.ObjectId(), ...d })
@@ -38,6 +39,8 @@ CategoryModel.updateOne = async () => ({ modifiedCount: 0 })
 let kb = []
 Object.defineProperty(globalThis, '__cats', { get: () => rows(CategoryModel), set: (v) => store.set(CategoryModel, v) })
 KnowledgeArticleModel.countDocuments = async () => kb.length
+const counters = {} // the public-id counter, in memory
+CounterModel.findOneAndUpdate = async (f) => { counters[f._id] = (counters[f._id] ?? 0) + 1; return { seq: counters[f._id] } }
 const realCreate = async (d) => { await new KnowledgeArticleModel(d).validate(); kb.push(d); return d } // real schema validation
 KnowledgeArticleModel.create = realCreate
 

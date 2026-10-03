@@ -88,15 +88,22 @@ describe('POST /ai-api/classify-ticket and GET /ai-api/kb-suggestions', () => {
     return sift(rest)(doc)
   }
 
+  // the test server closes idle connections; on a busy machine fetch can reuse one that was just closed (ECONNRESET), so try once more
+  const fetchOnce = async (url, options) => {
+    try { return await fetch(url, options) } catch (err) {
+      if (err?.cause?.code !== 'ECONNRESET') throw err
+      return fetch(url, options)
+    }
+  }
   const call = async (as, method, path, body) => {
     const headers = { 'Content-Type': 'application/json' }
     if (as) headers.Cookie = `token=${jwt.sign({ id: USERS[as]._id }, 'test-secret')}`
-    const res = await fetch(base + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined })
+    const res = await fetchOnce(base + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined })
     return { status: res.status, body: await res.json() }
   }
   const callBare = async (as, method, path) => {
     const headers = as ? { Cookie: `token=${jwt.sign({ id: USERS[as]._id }, 'test-secret')}` } : {}
-    const res = await fetch(base + path, { method, headers })
+    const res = await fetchOnce(base + path, { method, headers })
     return { status: res.status, body: await res.json() }
   }
 

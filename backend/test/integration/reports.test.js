@@ -18,7 +18,7 @@ describe('reports and CSV export (real database)', () => {
   before(async () => {
     ctx = await bootApp({}, { fixtures: false })
     const { seedIfEmpty } = await import('../../utils/seedData.js')
-    await seedIfEmpty()
+    await seedIfEmpty({ extraDemoTickets: false })
     ;[admin, mia, ian, theo, emp, assets] = await Promise.all(
       ['admin@sdp.test', 'manager@sdp.test', 'ian@sdp.test', 'tech@sdp.test', 'employee@sdp.test', 'assets@sdp.test'].map((e) => loginAs(ctx.app, e)),
     )
