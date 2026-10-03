@@ -8,8 +8,10 @@ import { startWarrantyChecker, runWarrantyCheck } from './jobs/warrantyChecker.j
 
 // fail fast if required env vars are missing
 const required = ['MONGO_URI', 'JWT_SECRET', 'CLIENT_URL']
-for (const key of required) {
-  if (!process.env[key]) {
+for (const key of required)
+{
+  if(!process.env[key])
+  {
     console.error(`Missing required env var: ${key}. Copy .env.example to .env and fill it in.`)
     process.exit(1)
   }
@@ -22,7 +24,9 @@ const hasDbName = (uri) => {
   const afterHosts = uri.replace(/^mongodb(\+srv)?:\/\//, '').split('?')[0]
   return /\/[^/]+$/.test(afterHosts)
 }
-if (!hasDbName(process.env.MONGO_URI)) {
+
+if(!hasDbName(process.env.MONGO_URI))
+{
   console.log('WARNING: MONGO_URI has no database name, so MongoDB uses the default "test" database. Use .../servicedeskpro_dev locally and .../servicedeskpro_prod on Render.')
 }
 
