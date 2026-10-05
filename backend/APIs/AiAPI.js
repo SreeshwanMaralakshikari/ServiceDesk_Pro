@@ -67,7 +67,7 @@ aiApp.post('/classify-ticket', verifyToken('EMPLOYEE', 'ADMIN'), aiLimiter, asyn
     const text = `${cleanTitle}\n${cleanDescription}`.trim()
 
     const [categories, priorityDocs] = await Promise.all([
-      CategoryModel.find({ isActive: true }).select('name').sort({ name: 1 }), // deterministic order for the fallback tie-break and the AI prompt's list
+      CategoryModel.find({ isActive: true }).select('name skills').sort({ name: 1 }), // deterministic order for the fallback tie-break and the AI prompt's list
       // TEST is an internal demo-only priority (Phase 3) — never a real suggestion
       SLAPolicyModel.find({ isActive: true, level: { $gt: 0 } }).select('priority').sort({ level: 1 }),
     ])

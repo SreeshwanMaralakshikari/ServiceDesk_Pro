@@ -68,7 +68,7 @@ describe('deploy fixes (real database)', () => {
     const gone = await newAsset({ name: 'Replaced one', warrantyExpiry: soon })
     await AssetModel.updateOne({ publicId: gone.publicId }, { status: 'REPLACED' })
     const r = await assets.get('/asset-api/assets/warranty-expiring')
-    const ids = r.body.payload.map((x) => x.publicId)
+    const ids = r.body.payload.items.map((x) => x.publicId)
     assert.ok(ids.includes(live.publicId)); assert.ok(!ids.includes(gone.publicId))
     const { runWarrantyCheck } = await import('../../jobs/warrantyChecker.js')
     await AssetModel.updateMany({}, { warrantyNotified: false })

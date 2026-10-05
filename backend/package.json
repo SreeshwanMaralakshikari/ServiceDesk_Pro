@@ -10,7 +10,8 @@
     "seed": "node utils/seedData.js",
     "test": "node --test",
     "test:unit": "node --test \"test/*.test.js\"",
-    "test:integration": "node --test --test-concurrency=4 \"test/integration/*.test.js\""
+    "test:integration": "node --test --test-concurrency=4 \"test/integration/*.test.js\"",
+    "docs": "node scripts/generateDocs.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

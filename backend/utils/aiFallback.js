@@ -2,19 +2,24 @@
 // (no API key) or its response fails validation — so classify-ticket always
 // answers something useful, never a 5xx, with or without GROQ_API_KEY set.
 
+import { tokenize } from './dsa/similarity.js'
+
 const URGENT_WORDS = ['urgent', 'asap', 'critical', 'down', 'outage', 'broken', 'cannot work', "can't work", 'blocked', 'emergency']
 
-const tokenize = (text) => (text || '').toLowerCase().match(/[a-z0-9]+/g) || []
-
-// Picks the category whose name shares the most whole-word overlap with the
-// ticket text. Returns null (no guess) rather than a wrong pick when nothing
-// overlaps at all — a missing suggestion is honest; a random one isn't.
+// Picks the category whose name, then whose skill tags, overlap most with the
+// ticket text (a name word counts twice, a skill tag once, words lightly stemmed),
+// so "my laptop screen flickers" finds Hardware through its `laptop` skill.
+// Returns null (no guess) rather than a wrong pick when nothing overlaps at all —
+// a missing suggestion is honest; a random one isn't. Ties keep the first category
+// in the order given (the route sorts by name).
 export const guessCategory = (text, categories) => {
-  const words = new Set(tokenize(text))
+  const words = tokenize(text)
   let best = null
   let bestScore = 0
   for (const c of categories) {
-    const score = tokenize(c.name).filter((w) => words.has(w)).length
+    const nameHits = [...tokenize(c.name)].filter((w) => words.has(w)).length
+    const skillHits = [...tokenize((c.skills || []).join(' '))].filter((w) => words.has(w)).length
+    const score = nameHits * 2 + skillHits
     if (score > bestScore) {
       bestScore = score
       best = c

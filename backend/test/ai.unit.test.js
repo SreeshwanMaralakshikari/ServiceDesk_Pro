@@ -137,6 +137,21 @@ describe('offline fallback heuristics', () => {
   test('guessCategory is case-insensitive and ignores punctuation', () => {
     assert.equal(guessCategory('NETWORK!! outage, network down', categories)?.name, 'Network')
   })
+  test('guessCategory also uses the category skill tags (F-101)', () => {
+    const withSkills = [
+      { _id: 'c1', name: 'Hardware', skills: ['hardware', 'laptop', 'printer', 'monitor'] },
+      { _id: 'c2', name: 'Network', skills: ['network', 'wifi', 'vpn'] },
+      { _id: 'c3', name: 'Printing', skills: ['printer', 'hardware'] },
+      { _id: 'c4', name: 'Software', skills: ['software', 'outlook', 'office'] },
+    ]
+    assert.equal(guessCategory('My laptop screen flickers', withSkills)?.name, 'Hardware')
+    assert.equal(guessCategory('Monitors stay black', withSkills)?.name, 'Hardware', 'plural is stemmed')
+    assert.equal(guessCategory('VPN keeps disconnecting', withSkills)?.name, 'Network')
+    assert.equal(guessCategory('Outlook will not open', withSkills)?.name, 'Software')
+    // a name word outweighs a skill tag: "printing" names Printing, "printer" is a skill of both
+    assert.equal(guessCategory('printing from my printer fails', withSkills)?.name, 'Printing')
+    assert.equal(guessCategory('parking space request', withSkills), null, 'still no guess when nothing matches')
+  })
   test('guessCategory handles empty/undefined text without throwing', () => {
     assert.equal(guessCategory('', categories), null)
     assert.equal(guessCategory(undefined, categories), null)

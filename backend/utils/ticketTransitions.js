@@ -1,3 +1,5 @@
+import { statusRefusal } from './statusRefusal.js'
+
 // Full Section 6b status matrix (linked-ticket/duplicate closing and
 // watchers are not part of this build). ON_HOLD pausing is counted in
 // business hours by the route handlers (see utils/businessHours.js).
@@ -32,7 +34,7 @@ export const REOPEN_WINDOW_DAYS = 7
 export const isTransitionAllowed = (action, currentStatus, role) => {
   const rule = TRANSITIONS[action]
   if (!rule) return { ok: false, reason: 'unknown action' }
-  if (!rule.from.includes(currentStatus)) return { ok: false, reason: `cannot ${action} a ${currentStatus} ticket` }
+  if (!rule.from.includes(currentStatus)) return { ok: false, reason: statusRefusal(action, currentStatus, 'ticket') }
   if (!rule.roles.includes(role)) return { ok: false, reason: 'not authorized for this action' }
   return { ok: true, to: rule.to, requiresNote: Boolean(rule.requiresNote), assigneeOnly: Boolean(rule.assigneeOnly) }
 }

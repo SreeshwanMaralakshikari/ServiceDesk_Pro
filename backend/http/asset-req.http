@@ -5,8 +5,11 @@
 ### list assets
 GET {{baseUrl}}/asset-api/assets
 
-### warranty-expiring report (default 30 days)
-GET {{baseUrl}}/asset-api/assets/warranty-expiring
+### warranty-expiring report (default 30 days), soonest first; paged: { items, total, page, totalPages }
+GET {{baseUrl}}/asset-api/assets/warranty-expiring?page=1&limit=20
+
+### warranty-expiring within 90 days
+GET {{baseUrl}}/asset-api/assets/warranty-expiring?days=90
 
 ### create an asset
 POST {{baseUrl}}/asset-api/assets

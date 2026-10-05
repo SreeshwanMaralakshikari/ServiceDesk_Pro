@@ -57,7 +57,7 @@ const connectDB = async (attempt = 1) => {
   } catch (err) {
     console.log(`err in db connect (attempt ${attempt}/${maxAttempts}):`, err.message)
     if (attempt >= maxAttempts) {
-      console.log('giving up after repeated failures — check MONGO_URI, Atlas Network Access, and your network/firewall (see PLAN.md / README.md troubleshooting notes)')
+      console.log('giving up after repeated failures — check MONGO_URI, Atlas Network Access, and your network/firewall (see Troubleshooting in backend/README.md)')
       process.exit(1)
     }
     console.log(`retrying in ${delayMs / 1000}s...`)

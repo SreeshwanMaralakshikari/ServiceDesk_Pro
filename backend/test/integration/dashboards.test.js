@@ -194,7 +194,8 @@ describe('dashboards on the seeded demo data (real database)', () => {
     assert.deepEqual(s.byVendor.map((v) => [v.name, v.count, v.purchaseTotal]), [['Dell Technologies', 2, 90000], ['Microsoft', 1, 15000], ['Netgear Solutions', 1, 45000]])
     // the same three assets the existing warranty report lists
     const report = (await assets.get('/asset-api/assets/warranty-expiring')).body.payload
-    assert.equal(report.length, s.warranty.expiringSoon + s.warranty.expired)
+    assert.equal(report.total, s.warranty.expiringSoon + s.warranty.expired)
+    assert.equal(report.items.length, report.total)
     assert.equal((await admin.get('/asset-api/stats')).status, 200)
     assert.equal((await emp.get('/asset-api/stats')).status, 403)
     assert.equal((await theo.get('/asset-api/stats')).status, 403)

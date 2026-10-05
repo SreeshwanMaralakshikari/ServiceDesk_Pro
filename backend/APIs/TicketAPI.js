@@ -205,6 +205,7 @@ ticketApp.get('/tickets/:ticketId', verifyToken(...ALL_ROLES), async (req, res, 
       .populate('requester', 'firstName lastName email')
       .populate('assignedTo', 'firstName lastName email')
       .populate('category', 'name ticketType')
+      .populate('relatedAsset', 'publicId name assetClass status')
       .populate('comments.author', 'firstName lastName role')
 
     if (!ticket) {
@@ -427,9 +428,12 @@ ticketApp.patch('/tickets/:ticketId/related-asset', verifyToken(...ALL_ROLES), a
       return res.status(403).json({ message: 'not authorized to link an asset to this ticket' })
     }
 
+    // the audit row names assets by their public id, not the raw _id
+    const before = ticket.relatedAsset ? ((await AssetModel.findById(ticket.relatedAsset).select('publicId').lean())?.publicId ?? String(ticket.relatedAsset)) : null
     if (!assetId) {
       ticket.relatedAsset = undefined
       await ticket.save()
+      if (before) await logAudit({ req, action: 'TICKET_ASSET_UNLINKED', entityType: 'TICKET', entity: ticket, before: { relatedAsset: before } })
       //send res
       return res.status(200).json({ message: 'related asset cleared', payload: toTicketView(ticket, req.user) })
     }
@@ -451,6 +455,7 @@ ticketApp.patch('/tickets/:ticketId/related-asset', verifyToken(...ALL_ROLES), a
 
     ticket.relatedAsset = asset._id
     await ticket.save()
+    await logAudit({ req, action: 'TICKET_ASSET_LINKED', entityType: 'TICKET', entity: ticket, before: { relatedAsset: before }, after: { relatedAsset: asset.publicId } })
     //send res
     res.status(200).json({ message: 'related asset linked', payload: toTicketView(ticket, req.user) })
   } catch (err) {

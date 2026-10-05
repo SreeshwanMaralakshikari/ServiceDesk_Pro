@@ -16,6 +16,8 @@ const checks = [
   ['mongoose refs + populate paths',  [path.join(here, 'model-refs.mjs')],          root],
   ['dependencies declared/locked/installed', [path.join(here, 'dependencies.mjs')], root],
   ['seed scenarios A-G',              [path.join(here, 'seed-scenarios.mjs')],      root],
+  ['documentation: READMEs and links', [path.join(here, 'doc-links.mjs')],   root],
+  ['generated docs up to date',       [path.join(root, 'backend', 'scripts', 'generateDocs.js'), '--check'], path.join(root, 'backend')],
 ]
 // real-database tests download a mongod binary on first run, so they are
 // opt-out (SKIP_INTEGRATION=1) for machines/sandboxes that cannot download it

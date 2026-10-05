@@ -153,4 +153,20 @@ describe('AI: classify -> create ticket -> acceptedByUser, and KB re-ranking (re
     await tech.get(`/ai-api/kb-suggestions/${t.publicId}?refresh=true`)
     assert.equal(calls.length, 2, 'refresh still asks again')
   })
+
+  test('without a key the fallback finds a category through its skill tags (F-101)', async () => {
+    reset()
+    const { CategoryModel } = await import('../../models/CategoryModel.js')
+    await CategoryModel.updateOne({ _id: ctx.fx.categories.network._id }, { $set: { skills: ['network', 'wifi', 'vpn'] } })
+    try {
+      const r = await classify(emp, { title: 'VPN keeps disconnecting', description: 'every few minutes since this morning' })
+      assert.equal(r.status, 200)
+      assert.equal(r.body.payload.source, 'fallback')
+      assert.equal(r.body.payload.categoryName, 'Network')
+      assert.equal(r.body.payload.categoryId, String(ctx.fx.categories.network._id))
+      assert.equal(calls.length, 0)
+    } finally {
+      await CategoryModel.updateOne({ _id: ctx.fx.categories.network._id }, { $set: { skills: [] } })
+    }
+  })
 })

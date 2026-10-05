@@ -1,3 +1,5 @@
+import { statusRefusal } from './statusRefusal.js'
+
 // The one write path for every status change (tickets, assets, KB articles).
 // The update only matches while the document is still in an allowed status AND
 // still at the version the client last saw, so two simultaneous requests can
@@ -28,7 +30,7 @@ export const atomicTransition = async ({ Model, doc, action, noun, from, version
   // a stale version wins over a status mismatch: the caller is looking at old
   // data either way, and 409 tells the client to refresh
   if (current.version !== version) return { error: { status: 409, message: `${noun} was updated by someone else, please refresh` } }
-  if (!from.includes(current.status)) return { error: { status: 400, message: `cannot ${action} a ${current.status} ${noun}` } }
+  if (!from.includes(current.status)) return { error: { status: 400, message: statusRefusal(action, current.status, noun) } }
   return { error: { status: 409, message: `${noun} was updated by someone else, please refresh` } }
 }
 

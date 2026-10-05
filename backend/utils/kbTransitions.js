@@ -1,3 +1,5 @@
+import { statusRefusal } from './statusRefusal.js'
+
 // Workflow for KnowledgeArticle. Same declarative table + checker pattern as
 // ticketTransitions.js / assetTransitions.js.
 //
@@ -16,7 +18,7 @@ export const KB_TRANSITIONS = {
 export const isKbTransitionAllowed = (action, currentStatus, role) => {
   const rule = KB_TRANSITIONS[action]
   if (!rule) return { ok: false, reason: 'unknown action' }
-  if (!rule.from.includes(currentStatus)) return { ok: false, reason: `cannot ${action} a ${currentStatus} article` }
+  if (!rule.from.includes(currentStatus)) return { ok: false, reason: statusRefusal(action, currentStatus, 'article') }
   if (!rule.roles.includes(role)) return { ok: false, reason: 'not authorized for this action' }
   return { ok: true, to: rule.to, authorOnlyForTechnician: Boolean(rule.authorOnlyForTechnician) }
 }

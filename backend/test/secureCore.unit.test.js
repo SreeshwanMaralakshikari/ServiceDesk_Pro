@@ -13,6 +13,10 @@ import { atomicTransition, isValidVersion } from '../utils/atomicTransition.js'
 import { aiLimiter, loginLimiter } from '../middlewares/rateLimiters.js'
 import { applyUpdate } from '../testkit/applyUpdate.js'
 import { APP_TIME_ZONE } from '../utils/timezone.js'
+import { statusRefusal } from '../utils/statusRefusal.js'
+import { isTransitionAllowed } from '../utils/ticketTransitions.js'
+import { isAssetTransitionAllowed } from '../utils/assetTransitions.js'
+import { isKbTransitionAllowed } from '../utils/kbTransitions.js'
 
 const DEPT = '64b00000000000000000aaaa'
 const OTHER = '64b00000000000000000bbbb'
@@ -127,7 +131,7 @@ describe('atomicTransition decision logic (fake model)', () => {
     r = await atomicTransition({ Model: fakeModel({ status: 'ASSIGNED', version: 1 }, { updateResult: null }), ...base })
     assert.equal(r.error.status, 409, 'the loser of a claim race: status AND version changed')
     r = await atomicTransition({ Model: fakeModel({ status: 'ASSIGNED', version: 0 }, { updateResult: null }), ...base })
-    assert.equal(r.error.status, 400); assert.match(r.error.message, /cannot claim a ASSIGNED ticket/)
+    assert.equal(r.error.status, 400); assert.match(r.error.message, /^cannot claim a ticket that is assigned$/)
     r = await atomicTransition({ Model: fakeModel({ status: 'OPEN', version: 0 }, { updateResult: null }), ...base })
     assert.equal(r.error.status, 409, 'a guard we cannot explain is treated as a conflict')
   })
@@ -180,3 +184,18 @@ describe('rate limiters', () => {
 })
 
 test('timezone constant', () => assert.equal(APP_TIME_ZONE, 'Asia/Kolkata'))
+
+describe('statusRefusal (F-103)', () => {
+  test('reads as a sentence: article, lower-case status, no underscores', () => {
+    assert.equal(statusRefusal('assign', 'ASSIGNED', 'ticket'), 'cannot assign a ticket that is assigned')
+    assert.equal(statusRefusal('resolve', 'IN_PROGRESS', 'ticket'), 'cannot resolve a ticket that is in progress')
+    assert.equal(statusRefusal('retire', 'IN_REPAIR', 'asset'), 'cannot retire an asset that is in repair')
+    assert.equal(statusRefusal('publish', 'PENDING_APPROVAL', 'article'), 'cannot publish an article that is pending approval')
+    assert.equal(statusRefusal('use', 'ASSIGNED', 'replacement asset'), 'cannot use a replacement asset that is assigned')
+  })
+  test('the transition checkers use it', () => {
+    assert.equal(isTransitionAllowed('assign', 'ASSIGNED', 'MANAGER').reason, 'cannot assign a ticket that is assigned')
+    assert.equal(isAssetTransitionAllowed('activate', 'IN_STOCK', 'ADMIN', {}).reason, 'cannot activate an asset that is in stock')
+    assert.equal(isKbTransitionAllowed('publish', 'ARCHIVED', 'ADMIN').reason, 'cannot publish an article that is archived')
+  })
+})

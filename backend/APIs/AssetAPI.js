@@ -81,18 +81,24 @@ assetApp.get('/stats', verifyToken(...MANAGE_ROLES), async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-// warranty-expiring report — registered before /:assetId so "warranty-expiring" is never swallowed as an id
+// warranty-expiring report, soonest first and paged like every other list (F-094) —
+// registered before /:assetId so "warranty-expiring" is never swallowed as an id
 assetApp.get('/assets/warranty-expiring', verifyToken(...READ_ROLES), async (req, res, next) => {
   try {
     const days = Number(req.query.days) || 30
     const cutoff = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
-    const assets = await AssetModel.find({
+    const query = {
       isDeleted: false,
       status: { $nin: NO_WARRANTY_ALERT_STATUSES },
       warrantyExpiry: { $ne: null, $lte: cutoff },
-    }).populate('assignedTo', 'firstName lastName').sort({ warrantyExpiry: 1 })
+    }
+    const paging = getPagination(req.query)
+    const [items, total] = await Promise.all([
+      AssetModel.find(query).populate('assignedTo', 'firstName lastName').sort({ warrantyExpiry: 1, _id: 1 }).skip(paging.skip).limit(paging.limit),
+      AssetModel.countDocuments(query),
+    ])
     //send res
-    res.status(200).json({ message: 'warranty-expiring assets fetched', payload: assets })
+    res.status(200).json({ message: 'warranty-expiring assets fetched', payload: toPage(items, total, paging) })
   } catch (err) { next(err) }
 })
 
@@ -280,7 +286,7 @@ assetApp.patch('/assets/:assetId/replace', verifyToken(...MANAGE_ROLES), async (
       let second
       try {
         second = await atomicTransition({
-          Model: AssetModel, doc: newAsset, action: 'be used as a replacement while', noun: 'asset', from: ['IN_STOCK'], version: newAsset.version, session,
+          Model: AssetModel, doc: newAsset, action: 'use', noun: 'replacement asset', from: ['IN_STOCK'], version: newAsset.version, session,
           set: { status: 'ASSIGNED', assignedTo: assignee, replaces: oldAsset._id },
           push: { lifecycleHistory: { fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', by: req.user.id, note: note || `replacing ${oldAsset.publicId}`, at: now } },
         })

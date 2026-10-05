@@ -1,10 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
 import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useAuthStore } from '../../store/authStore.js'
 import { styles, assetStatusColors } from '../../styles/common.js'
 import { getErrorMessage } from '../../utils/errors.js'
+import { Modal, ModalFooter } from '../common/Modal.jsx'
+import { Field } from '../common/Field.jsx'
 
 // mirrors ticketTransitions.js's shape, kept in sync with backend/utils/assetTransitions.js
 const actionsFor = (asset, user) => {
@@ -32,6 +35,76 @@ const ACTION_LABELS = {
   retire: 'Retire', replace: 'Replace',
 }
 
+// the editable details (status, type and assignee change only through the lifecycle actions)
+const EDIT_FIELDS = ['name', 'assetClass', 'serialNumber', 'licenseKey', 'vendor', 'purchaseDate', 'purchaseCost', 'warrantyExpiry', 'location']
+const dateValue = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '')
+const formValuesOf = (asset) => ({
+  name: asset.name ?? '', assetClass: asset.assetClass ?? '', serialNumber: asset.serialNumber ?? '', licenseKey: asset.licenseKey ?? '',
+  vendor: asset.vendor?._id ?? asset.vendor ?? '', purchaseDate: dateValue(asset.purchaseDate),
+  purchaseCost: asset.purchaseCost ?? '', warrantyExpiry: dateValue(asset.warrantyExpiry), location: asset.location ?? '',
+})
+
+const EditAssetModal = ({ asset, onClose, onSaved }) => {
+  const initial = formValuesOf(asset)
+  const { register, handleSubmit, setValue, formState: { errors, isSubmitting } } = useForm({ defaultValues: initial })
+  const [vendors, setVendors] = useState([])
+  const [serverError, setServerError] = useState('')
+
+  useEffect(() => {
+    axiosInstance.get('/vendor-api/vendors').then(({ data }) => setVendors(data.payload)).catch((err) => setServerError(getErrorMessage(err, 'Could not load vendors')))
+  }, [])
+  // the vendor options arrive after the first render, so select the current vendor once they exist
+  useEffect(() => {
+    if (vendors.length) setValue('vendor', initial.vendor)
+  }, [vendors, setValue, initial.vendor])
+
+  const submit = async (values) => {
+    setServerError('')
+    // only what changed; '' clears an optional field on the server
+    const changes = {}
+    for (const key of EDIT_FIELDS) {
+      const value = typeof values[key] === 'string' ? values[key].trim() : values[key]
+      if (String(value) !== String(initial[key])) changes[key] = value
+    }
+    if (Object.keys(changes).length === 0) return onClose()
+    try {
+      await axiosInstance.patch(`/asset-api/assets/${asset.publicId}`, changes)
+      onSaved()
+    } catch (err) {
+      setServerError(getErrorMessage(err, 'Failed to save the asset'))
+    }
+  }
+
+  const isSoftware = asset.type === 'SOFTWARE'
+  return (
+    <Modal title={`Edit ${asset.publicId}`} onClose={onClose}>
+      <form onSubmit={handleSubmit(submit)} noValidate>
+        <Field label="Name" error={errors.name}><input className={styles.input} {...register('name', { validate: (v) => v.trim() !== '' || 'Name is required' })} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Class" error={errors.assetClass}><input className={styles.input} {...register('assetClass', { validate: (v) => v.trim() !== '' || 'Class is required' })} /></Field>
+          {isSoftware
+            ? <Field label="License key"><input className={styles.input} {...register('licenseKey')} /></Field>
+            : <Field label="Serial number"><input className={styles.input} {...register('serialNumber')} /></Field>}
+        </div>
+        <Field label="Vendor">
+          <select className={styles.select} {...register('vendor')}>
+            <option value="">None</option>
+            {vendors.map((v) => <option key={v._id} value={v._id}>{v.name}{v.isActive ? '' : ' (inactive)'}</option>)}
+          </select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Purchase date"><input className={styles.input} type="date" {...register('purchaseDate')} /></Field>
+          <Field label="Cost" error={errors.purchaseCost}><input className={styles.input} type="number" min="0" step="any" {...register('purchaseCost', { validate: (v) => v === '' || Number(v) >= 0 || 'Cannot be negative' })} /></Field>
+        </div>
+        <Field label="Warranty expiry" hint="Changing it re-arms the 30-day warranty reminder."><input className={styles.input} type="date" {...register('warrantyExpiry')} /></Field>
+        <Field label="Location"><input className={styles.input} {...register('location')} /></Field>
+        <p className="text-xs text-slate-400">Status, type and the assignee change only through the actions on the asset page.</p>
+        <ModalFooter error={serverError} submitting={isSubmitting} submitLabel="Save changes" onCancel={onClose} />
+      </form>
+    </Modal>
+  )
+}
+
 export const AssetDetail = () => {
   const { assetId } = useParams()
   const user = useAuthStore((s) => s.user)
@@ -43,6 +116,7 @@ export const AssetDetail = () => {
   const [replacementPick, setReplacementPick] = useState('')
   const [note, setNote] = useState('')
   const [maintForm, setMaintForm] = useState({ type: '', cost: '', note: '' })
+  const [editing, setEditing] = useState(false)
 
   const load = useCallback(() => {
     axiosInstance.get(`/asset-api/assets/${assetId}`)
@@ -107,6 +181,7 @@ export const AssetDetail = () => {
 
   const actions = actionsFor(asset, user)
   const isStaff = user.role === 'ASSET_MANAGER' || user.role === 'ADMIN' || user.role === 'TECHNICIAN'
+  const canEdit = user.role === 'ASSET_MANAGER' || user.role === 'ADMIN'
 
   return (
     <div className={styles.container}>
@@ -116,7 +191,10 @@ export const AssetDetail = () => {
             <p className="font-mono text-xs text-slate-400">{asset.publicId}</p>
             <h1 className={styles.h1 + ' mb-1'}>{asset.name}</h1>
           </div>
-          <span className={`${styles.badge} ${assetStatusColors[asset.status] || ''}`}>{asset.status}</span>
+          <div className="flex items-center gap-2">
+            {canEdit && <button type="button" className={styles.btnSecondary} onClick={() => setEditing(true)}>Edit details</button>}
+            <span className={`${styles.badge} ${assetStatusColors[asset.status] || ''}`}>{asset.status}</span>
+          </div>
         </div>
         <p className="text-sm text-slate-500 mb-4">
           {asset.type} · {asset.assetClass}
@@ -128,6 +206,11 @@ export const AssetDetail = () => {
           Assigned to: {asset.assignedTo ? `${asset.assignedTo.firstName} ${asset.assignedTo.lastName}` : 'unassigned'}
           {asset.warrantyExpiry && <> · Warranty until {new Date(asset.warrantyExpiry).toLocaleDateString()}</>}
         </p>
+        {(asset.location || asset.purchaseDate || asset.purchaseCost != null) && (
+          <p className="text-sm text-slate-500 mb-2" data-testid="asset-extra">
+            {[asset.location && `Location: ${asset.location}`, asset.purchaseDate && `Bought ${new Date(asset.purchaseDate).toLocaleDateString()}`, asset.purchaseCost != null && `Cost ₹${asset.purchaseCost}`].filter(Boolean).join(' · ')}
+          </p>
+        )}
         {asset.replaces && <p className="text-xs text-slate-400 mb-1">Replaces: {asset.replaces.publicId} ({asset.replaces.name})</p>}
         {asset.replacedBy && <p className="text-xs text-slate-400 mb-4">Replaced by: {asset.replacedBy.publicId} ({asset.replacedBy.name})</p>}
 
@@ -183,6 +266,8 @@ export const AssetDetail = () => {
             </form>
           </>
         )}
+
+        {editing && <EditAssetModal asset={asset} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); toast.success('Asset updated'); load() }} />}
 
         <h2 className={styles.h2}>Lifecycle history</h2>
         <ul className="space-y-1">

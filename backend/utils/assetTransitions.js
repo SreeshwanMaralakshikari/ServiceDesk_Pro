@@ -1,3 +1,5 @@
+import { statusRefusal } from './statusRefusal.js'
+
 // Section 6b asset table. Every entry appends to lifecycleHistory.
 // `assigneeRequired`/`clearsAssignee` flag the special-case field effects
 // the route handler needs to apply alongside the plain status change.
@@ -19,7 +21,7 @@ export const ASSET_TRANSITIONS = {
 export const isAssetTransitionAllowed = (action, currentStatus, role, asset) => {
   const rule = ASSET_TRANSITIONS[action]
   if (!rule) return { ok: false, reason: 'unknown action' }
-  if (!rule.from.includes(currentStatus)) return { ok: false, reason: `cannot ${action} a ${currentStatus} asset` }
+  if (!rule.from.includes(currentStatus)) return { ok: false, reason: statusRefusal(action, currentStatus, 'asset') }
   if (!rule.roles.includes(role)) return { ok: false, reason: 'not authorized for this action' }
   if (rule.requiresExistingAssignee && !asset.assignedTo) {
     return { ok: false, reason: 'this asset has no assignee on record — use restock instead' }

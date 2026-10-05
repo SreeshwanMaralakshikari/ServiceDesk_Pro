@@ -13,12 +13,11 @@ export const AssetList = () => {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const canManage = user?.role === 'ASSET_MANAGER' || user?.role === 'ADMIN'
-  // the warranty report is one plain array (no paging); the normal list is the paged { items, total, page, totalPages } payload
+  // both views are paged { items, total, page, totalPages } lists
   const { data, loading, error } = useFetch(
     showWarrantyOnly ? '/asset-api/assets/warranty-expiring' : '/asset-api/assets',
-    showWarrantyOnly ? undefined : { page, limit: PAGE_SIZE },
+    { page, limit: PAGE_SIZE },
   )
-  const rows = showWarrantyOnly ? (Array.isArray(data) ? data : []) : data?.items
 
   const columns = [
     { key: 'publicId', header: 'ID', render: (a) => <span className="font-mono text-xs">{a.publicId}</span> },
@@ -41,11 +40,10 @@ export const AssetList = () => {
         </div>
       </div>
       <div className={styles.card}>
-        <DataTable columns={columns} rows={rows} loading={loading} error={error}
+        <DataTable columns={columns} rows={data?.items} loading={loading} error={error}
           onRowClick={(a) => navigate(`/assets/${a.publicId}`)}
-          page={showWarrantyOnly ? undefined : data?.page} totalPages={showWarrantyOnly ? undefined : data?.totalPages}
-          total={showWarrantyOnly ? undefined : data?.total} onPageChange={setPage}
-          emptyTitle="No assets found" />
+          page={data?.page} totalPages={data?.totalPages} total={data?.total} onPageChange={setPage}
+          emptyTitle={showWarrantyOnly ? 'No warranties end in the next 30 days' : 'No assets found'} />
       </div>
     </div>
   )

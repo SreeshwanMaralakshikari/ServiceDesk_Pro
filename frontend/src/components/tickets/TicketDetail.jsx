@@ -11,6 +11,7 @@ import { WorkLogPanel } from './WorkLogPanel.jsx'
 import { AuditPanel } from './AuditPanel.jsx'
 import { TimelinePanel } from './TimelinePanel.jsx'
 import { SimilarPanel } from './SimilarPanel.jsx'
+import { RelatedAssetPanel } from './RelatedAssetPanel.jsx'
 
 // actions that need a required text reason/note alongside them
 const NOTE_REQUIRED_ACTIONS = ['reject', 'cancel', 'hold', 'reopen']
@@ -296,6 +297,7 @@ export const TicketDetail = () => {
         )}
 
         <CsatPanel ticket={ticket} isRequester={isRequester} onSaved={load} />
+        <RelatedAssetPanel ticket={ticket} user={user} onChanged={load} />
         {isStaff && <WorkLogPanel ticket={ticket} canAdd={user.role === 'TECHNICIAN' && isAssignee && !isFinished} onChanged={() => setReloadKey((n) => n + 1)} />}
         {user.role === 'ADMIN' && <AuditPanel ticket={ticket} />}
 
