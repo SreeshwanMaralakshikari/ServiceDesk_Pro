@@ -36,6 +36,12 @@ describe('demo seed (real database)', () => {
     assert.equal(await M.Ticket.countDocuments(), 60)
   })
 
+  test('every seeded technician has skills, the main demo technician included (F-096)', async () => {
+    const techs = await M.User.find({ role: 'TECHNICIAN' }).lean()
+    assert.ok(techs.length >= 5)
+    for (const t of techs) assert.ok(t.skills.length > 0, `${t.email} has skills`)
+  })
+
   test('every category is handled by an IT team, and every ticket has a unique id', async () => {
     const itIds = new Set((await M.Dept.find({ kind: 'IT_SUPPORT' })).map((d) => String(d._id)))
     for (const c of await M.Cat.find()) assert.ok(itIds.has(String(c.department)), c.name)

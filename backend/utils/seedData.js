@@ -9,6 +9,7 @@ import { AssetModel } from '../models/AssetModel.js'
 import { KnowledgeArticleModel } from '../models/KnowledgeArticleModel.js'
 import { generateSequentialId } from './generateSequentialId.js'
 import { ensureDemoTickets } from './demoTickets.js'
+import { MIN_NEW_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from './passwordRule.js'
 
 config()
 
@@ -33,9 +34,8 @@ const seedKnowledgeBase = async () => {
   }
   const daysAgo = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000)
 
-  // created one at a time (not insertMany) — generateSequentialId counts
-  // existing docs to pick the next number, so batching these would hand
-  // out the same publicId to several articles at once
+  // created one at a time (not insertMany) so each article takes the next
+  // number from the counter in order
   const articleSeeds = [
     {
       title: 'How to Fix a Laptop That Won\'t Power On',
@@ -196,8 +196,8 @@ const ensureProductionAdmin = async () => {
     console.log('no SEED_ADMIN_PASSWORD set — skipping the production admin')
     return
   }
-  if (pw.length < 12) {
-    console.log('SEED_ADMIN_PASSWORD must be at least 12 characters — skipping the production admin')
+  if (pw.length < MIN_NEW_PASSWORD_LENGTH || pw.length > MAX_PASSWORD_LENGTH) {
+    console.log(`SEED_ADMIN_PASSWORD must be ${MIN_NEW_PASSWORD_LENGTH}-${MAX_PASSWORD_LENGTH} characters — skipping the production admin`)
     return
   }
   const email = (process.env.SEED_ADMIN_EMAIL || 'admin@sdp.test').toLowerCase()
@@ -260,7 +260,7 @@ export const seedIfEmpty = async ({ extraDemoTickets = true } = {}) => {
   const user = (u) => ensure(UserModel, { email: u.email }, { ...u, password })
   const admin = await user({ firstName: 'Ava', lastName: 'Admin', email: 'admin@sdp.test', role: 'ADMIN' })
   const manager = await user({ firstName: 'Mia', lastName: 'Manager', email: 'manager@sdp.test', role: 'MANAGER', department: depts.SVD._id })
-  const tech = await user({ firstName: 'Theo', lastName: 'Tech', email: 'tech@sdp.test', role: 'TECHNICIAN', department: depts.SVD._id })
+  const tech = await user({ firstName: 'Theo', lastName: 'Tech', email: 'tech@sdp.test', role: 'TECHNICIAN', department: depts.SVD._id, skills: ['hardware', 'laptop', 'printer'] })
   const employee = await user({ firstName: 'Eli', lastName: 'Employee', email: 'employee@sdp.test', role: 'EMPLOYEE', department: depts.ENG._id })
   const assetMgr = await user({ firstName: 'Amy', lastName: 'Assets', email: 'assets@sdp.test', role: 'ASSET_MANAGER' })
   await ensureProductionAdmin() // a developer can also set SEED_ADMIN_PASSWORD locally
@@ -305,7 +305,7 @@ export const seedIfEmpty = async ({ extraDemoTickets = true } = {}) => {
   const daysAgo = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000)
 
   // assets are keyed on serialNumber / licenseKey; publicId is only
-  // generated when the asset really is new (it counts existing docs)
+  // taken from the counter when the asset really is new
   const ensureAsset = async (key, doc) => {
     const existing = await AssetModel.findOne(key)
     if (existing) return existing

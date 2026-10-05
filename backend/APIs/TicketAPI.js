@@ -537,6 +537,8 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
     const set = {}
     const unset = {}
     const notifications = []
+    // the line the timeline shows next to the status change: the caller's note, or a default that says what happened
+    let historyNote = note
     if (check.to !== null) set.status = check.to
 
     if (action === 'approve') {
@@ -577,6 +579,7 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
         return res.status(400).json({ message: "technician must belong to the ticket's department" })
       }
       const previousAssignee = ticket.assignedTo
+      historyNote = note || `${action === 'reassign' ? 'reassigned' : 'assigned'} to ${fullName(technician)}`
       set.assignedTo = technician._id
       set.assignedBy = req.user.id
       set.assignedAt = now
@@ -615,6 +618,7 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
         return res.status(400).json({ message: 'resolutionSummary is required' })
       }
       set['resolution.summary'] = resolutionSummary
+      historyNote = note || resolutionSummary
       set['resolution.resolvedBy'] = req.user.id
       set['resolution.resolvedAt'] = now
       notifications.push({ user: ticket.requester, type: 'RESOLUTION_PENDING', message: `Ticket ${ticket.publicId} was marked resolved — please confirm` })
@@ -662,7 +666,7 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
     const result = await atomicTransition({
       Model: TicketModel, doc: ticket, action, noun: 'ticket', from: TRANSITIONS[action].from, version,
       set, unset,
-      push: { statusHistory: { from, to: check.to ?? from, by: req.user.id, note, at: now } },
+      push: { statusHistory: { from, to: check.to ?? from, by: req.user.id, note: historyNote, at: now } },
     })
     if (result.error) {
       //send res

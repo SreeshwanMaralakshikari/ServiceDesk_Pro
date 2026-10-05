@@ -287,6 +287,14 @@ export const TicketDetail = () => {
           </div>
         )}
 
+        {ticket.resolution?.summary && ['RESOLVED', 'CLOSED'].includes(ticket.status) && (
+          <div className="mb-6 border-t border-slate-100 pt-4" data-testid="resolution-summary">
+            <h2 className={styles.h2}>Resolution</h2>
+            <p className="text-sm text-slate-700 whitespace-pre-wrap">{ticket.resolution.summary}</p>
+            {ticket.resolution.resolvedAt && <p className="text-xs text-slate-400 mt-1">Resolved {new Date(ticket.resolution.resolvedAt).toLocaleString()}</p>}
+          </div>
+        )}
+
         <CsatPanel ticket={ticket} isRequester={isRequester} onSaved={load} />
         {isStaff && <WorkLogPanel ticket={ticket} canAdd={user.role === 'TECHNICIAN' && isAssignee && !isFinished} onChanged={() => setReloadKey((n) => n + 1)} />}
         {user.role === 'ADMIN' && <AuditPanel ticket={ticket} />}

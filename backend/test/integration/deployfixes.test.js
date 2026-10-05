@@ -127,4 +127,21 @@ describe('deploy fixes (real database)', () => {
     assert.ok(after.sla.resolutionDueAt, 'a due date was set from the old policy')
     await SLAPolicyModel.updateOne({ _id: policy._id }, { isActive: true })
   })
+  test('F-098 and F-099: assign and resolve leave a readable timeline line, and the resolution summary is on the ticket', async () => {
+    const t = await createTicket(emp, String(ctx.fx.categories.network._id))
+    const infra = ctx.fx.users.techInfra
+    const assign = await act(admin, t, 'assign', { technicianId: String(infra._id) })
+    assert.equal(assign.status, 200, JSON.stringify(assign.body))
+    let tl = (await emp.get(`/ticket-api/tickets/${t.publicId}/timeline`)).body.payload
+    assert.ok(tl.some((e) => e.note === 'assigned to Ian'), JSON.stringify(tl.map((e) => e.note)))
+    const techAgent = await loginAs(ctx.app, 'tech.infra@t.test')
+    let cur = await fetchTicket(techAgent, t)
+    cur = (await act(techAgent, cur, 'start')).body.payload
+    const done = await act(techAgent, cur, 'resolve', { resolutionSummary: 'Replaced the patch cable' })
+    assert.equal(done.status, 200, JSON.stringify(done.body))
+    tl = (await emp.get(`/ticket-api/tickets/${t.publicId}/timeline`)).body.payload
+    assert.ok(tl.some((e) => e.to === 'RESOLVED' && e.note === 'Replaced the patch cable'))
+    const view = await fetchTicket(emp, t)
+    assert.equal(view.resolution.summary, 'Replaced the patch cable', 'the requester receives the summary')
+  })
 })
