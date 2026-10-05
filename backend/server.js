@@ -41,14 +41,10 @@ const connectDB = async (attempt = 1) => {
     console.log(process.env.GROQ_API_KEY ? 'AI classification: enabled (GROQ_API_KEY set)' : 'AI classification: no GROQ_API_KEY set — classify-ticket will use the offline fallback')
 
     // never auto-seed production: demo accounts there come from `npm run seed`
-    if(process.env.SEED_ON_START === 'true')
-    {
-      if(process.env.NODE_ENV === 'production')
-      {
+    if (process.env.SEED_ON_START === 'true') {
+      if (process.env.NODE_ENV === 'production') {
         console.log('SEED_ON_START is ignored when NODE_ENV=production — run `npm run seed` once instead')
-      }
-      else
-      {
+      } else {
         await seedIfEmpty()
       }
     }

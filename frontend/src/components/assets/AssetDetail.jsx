@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useAuthStore } from '../../store/authStore.js'
 import { styles, assetStatusColors } from '../../styles/common.js'
+import { getErrorMessage } from '../../utils/errors.js'
 
 // mirrors ticketTransitions.js's shape, kept in sync with backend/utils/assetTransitions.js
 const actionsFor = (asset, user) => {
@@ -46,7 +47,7 @@ export const AssetDetail = () => {
   const load = useCallback(() => {
     axiosInstance.get(`/asset-api/assets/${assetId}`)
       .then(({ data }) => setAsset(data.payload))
-      .catch((err) => toast.error(err.response?.data?.message || 'Failed to load asset'))
+      .catch((err) => toast.error(getErrorMessage(err, 'Failed to load asset')))
       .finally(() => setLoading(false))
   }, [assetId])
 
@@ -54,8 +55,9 @@ export const AssetDetail = () => {
 
   useEffect(() => {
     if (user?.role === 'ASSET_MANAGER' || user?.role === 'ADMIN') {
-      axiosInstance.get('/asset-api/assignable-users').then(({ data }) => setUsers(data.payload)).catch(() => {})
-      axiosInstance.get('/asset-api/assets?status=IN_STOCK').then(({ data }) => setInStockAssets(data.payload.items)).catch(() => {})
+      axiosInstance.get('/asset-api/assignable-users').then(({ data }) => setUsers(data.payload)).catch((err) => toast.error(getErrorMessage(err, 'Could not load users')))
+      // 50 is the largest page the API serves
+      axiosInstance.get('/asset-api/assets', { params: { status: 'IN_STOCK', limit: 50 } }).then(({ data }) => setInStockAssets(data.payload.items)).catch((err) => toast.error(getErrorMessage(err, 'Could not load in-stock assets')))
     }
   }, [user])
 
@@ -70,7 +72,7 @@ export const AssetDetail = () => {
         toast.error('This asset changed. Reloading…')
         load()
       } else {
-        toast.error(err.response?.data?.message || `Failed to ${action}`)
+        toast.error(getErrorMessage(err, `Failed to ${action}`))
       }
     }
   }
@@ -83,7 +85,7 @@ export const AssetDetail = () => {
       setReplacementPick(''); setNote('')
       load()
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to replace asset')
+      toast.error(getErrorMessage(err, 'Failed to replace asset'))
     }
   }
 
@@ -96,7 +98,7 @@ export const AssetDetail = () => {
       setMaintForm({ type: '', cost: '', note: '' })
       load()
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to add maintenance entry')
+      toast.error(getErrorMessage(err, 'Failed to add maintenance entry'))
     }
   }
 

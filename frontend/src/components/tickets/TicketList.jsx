@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useFetch } from '../../hooks/useFetch.js'
 import { DataTable } from '../common/DataTable.jsx'
 import { StatusBadge, PriorityBadge, SLABadge } from '../common/Badges.jsx'
+import { useAuthStore } from '../../store/authStore.js'
 import { styles, statusColors } from '../../styles/common.js'
 
 const STATUSES = Object.keys(statusColors)
@@ -14,6 +15,9 @@ export const TicketList = () => {
   const [search, setSearch] = useState('')
   const [q, setQ] = useState('') // applied search, so typing does not fire a request per key
   const navigate = useNavigate()
+  const role = useAuthStore((s) => s.user?.role)
+  // the backend only lets employees (and admin) create tickets, so nobody else is offered the button
+  const canCreate = role === 'EMPLOYEE' || role === 'ADMIN'
   const { data, loading, error } = useFetch('/ticket-api/tickets', { page, limit: PAGE_SIZE, status: status || undefined, q: q || undefined })
 
   const columns = [
@@ -35,7 +39,7 @@ export const TicketList = () => {
     <div className={styles.container}>
       <div className="flex items-center justify-between mb-4">
         <h1 className={styles.h1 + ' mb-0'}>Tickets</h1>
-        <Link to="/tickets/new" className={styles.btnPrimary}>+ New ticket</Link>
+        {canCreate && <Link to="/tickets/new" className={styles.btnPrimary}>+ New ticket</Link>}
       </div>
       <div className={styles.card}>
         <form onSubmit={applySearch} className="flex flex-wrap items-center gap-2 mb-4">
@@ -50,7 +54,7 @@ export const TicketList = () => {
         <DataTable columns={columns} rows={data?.items} loading={loading} error={error}
           onRowClick={(t) => navigate(`/tickets/${t.publicId}`)}
           page={data?.page} totalPages={data?.totalPages} total={data?.total} onPageChange={setPage}
-          emptyTitle="No tickets found" emptyHint={q || status ? 'Try clearing the filters.' : 'Create one with “New ticket”.'} />
+          emptyTitle="No tickets found" emptyHint={q || status ? 'Try clearing the filters.' : canCreate ? 'Create one with “New ticket”.' : 'Tickets for your team will show up here.'} />
       </div>
     </div>
   )

@@ -106,10 +106,21 @@ export const TicketDetail = () => {
 
   useEffect(() => {
     if (user?.role === 'MANAGER' || user?.role === 'ADMIN') {
-      axiosInstance.get('/ticket-api/team-technicians').then(({ data }) => setTechnicians(data.payload)).catch(() => {})
       axiosInstance.get('/meta-api/priorities').then(({ data }) => setPriorities(data.payload)).catch(() => {})
     }
   }, [user])
+
+  // who can be assigned: a manager gets their own team from the server; an admin gets the ticket's
+  // team, because the assign route refuses a technician from any other team
+  const role = user?.role
+  const adminDepartment = role === 'ADMIN' ? (ticket?.department?._id ?? ticket?.department) : undefined
+  useEffect(() => {
+    if (role === 'MANAGER') {
+      axiosInstance.get('/ticket-api/team-technicians').then(({ data }) => setTechnicians(data.payload)).catch(() => {})
+    } else if (adminDepartment) {
+      axiosInstance.get('/ticket-api/team-technicians', { params: { department: adminDepartment } }).then(({ data }) => setTechnicians(data.payload)).catch(() => {})
+    }
+  }, [role, adminDepartment])
 
   // heap-ranked technicians for this ticket (lowest load, matching skills first),
   // fetched while the ticket still needs somebody
@@ -295,7 +306,7 @@ export const TicketDetail = () => {
                 {kbRefreshing ? 'Refreshing…' : 'Refresh'}
               </button>
             </div>
-            {kbSuggestions.articles.length === 0 && <p className="text-sm text-slate-500">The AI found no helpful article for this ticket.</p>}
+            {kbSuggestions.articles.length === 0 && <p className="text-sm text-slate-500">{kbSuggestions.source === 'ai' ? 'The AI found no helpful article for this ticket. Refresh to ask again.' : 'No matching article found for this ticket.'}</p>}
             <ul className="space-y-2">
               {kbSuggestions.articles.map((a) => (
                 <li key={a._id}>

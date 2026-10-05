@@ -17,7 +17,8 @@ Content-Type: application/json
   "servicesProvided": "Laptops and docking stations"
 }
 
-### update / deactivate a vendor (fails with 409 if still linked to active assets)
+### update / deactivate a vendor (fails with 409 if still linked to active assets; isActive must be a real
+### true/false — the text "false" is refused with 400). Create, update, activate and deactivate are audited (entity type VENDOR)
 PATCH {{baseUrl}}/vendor-api/vendors/PASTE_VENDOR_ID
 Content-Type: application/json
 

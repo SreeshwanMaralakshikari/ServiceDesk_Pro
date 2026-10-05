@@ -204,6 +204,12 @@ aiApp.get('/kb-suggestions/:ticketId', verifyToken('TECHNICIAN', 'MANAGER', 'ADM
 
     // 1) a saved AI answer, as long as those articles are still live
     const saved = ticket.ai?.kbSuggestions
+    // an empty saved list is an answer too ("nothing here helps"): it is served from the saved copy instead of asking the model on every view
+    if (!refresh && saved?.source === 'ai' && saved.items?.length === 0) {
+      await logAttempt({ kind: 'KB_SUGGESTIONS', status: 'SUCCESS', cached: true, requestedBy: req.user.id, ticket: ticket._id, output: { source: 'cache', articleIds: [] } })
+      //send res
+      return done({ matchedBy: saved.matchedBy ?? 'text+category', source: 'ai', cached: true, generatedAt: saved.at, articles: [] })
+    }
     if (!refresh && saved?.source === 'ai' && saved.items?.length) {
       const live = await KnowledgeArticleModel.find({ ...publishedOnly({}), publicId: { $in: saved.items.map((i) => i.publicId) } }).select(FIELDS)
       const articles = merge(live, saved.items.map((i) => (typeof i.toObject === 'function' ? i.toObject() : i)))

@@ -139,4 +139,18 @@ describe('AI: classify -> create ticket -> acceptedByUser, and KB re-ranking (re
     // the requester cannot use it
     assert.equal((await emp.get(`/ai-api/kb-suggestions/${t.publicId}`)).status, 403)
   })
+  test('an empty AI answer ("nothing here helps") is saved and served from the ticket, not asked for again on every view', async () => {
+    reset()
+    const { KnowledgeArticleModel } = await import('../../models/KnowledgeArticleModel.js')
+    await KnowledgeArticleModel.create({ publicId: `KB-2026-8${String(Math.floor(Math.random() * 9000) + 1000)}`, title: 'Printer queue stuck', summary: 'printer summary', content: 'printer content', category: ctx.fx.categories.hardware._id, author: ctx.fx.users.techSvc._id, status: 'PUBLISHED', publishedAt: new Date() })
+    const t = (await create(emp, { title: 'Printer queue stuck again', description: 'printer jobs wait forever' })).body.payload
+    useAi(JSON.stringify({ results: [] }))
+    let r = await tech.get(`/ai-api/kb-suggestions/${t.publicId}`)
+    assert.equal(r.status, 200); assert.equal(r.body.payload.source, 'ai'); assert.deepEqual(r.body.payload.articles, []); assert.equal(calls.length, 1)
+    r = await tech.get(`/ai-api/kb-suggestions/${t.publicId}`)
+    assert.equal(r.body.payload.source, 'ai'); assert.equal(r.body.payload.cached, true); assert.deepEqual(r.body.payload.articles, [])
+    assert.equal(calls.length, 1, 'the second view did not call the model')
+    await tech.get(`/ai-api/kb-suggestions/${t.publicId}?refresh=true`)
+    assert.equal(calls.length, 2, 'refresh still asks again')
+  })
 })

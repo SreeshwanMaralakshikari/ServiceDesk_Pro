@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../store/authStore.js'
 import { styles } from '../styles/common.js'
+import { getErrorMessage } from '../utils/errors.js'
 
 export const Login = () => {
   const [form, setForm] = useState({ email: '', password: '' })
@@ -14,11 +15,12 @@ export const Login = () => {
     e.preventDefault()
     setLoading(true)
     try {
-      await login(form.email, form.password)
+      const user = await login(form.email, form.password)
       toast.success('Welcome back!')
-      navigate('/tickets')
+      // the asset manager has no tickets page in the menu, so start on their own dashboard
+      navigate(user?.role === 'ASSET_MANAGER' ? '/asset-stats' : '/tickets')
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Login failed')
+      toast.error(getErrorMessage(err, 'Login failed'))
     } finally {
       setLoading(false)
     }

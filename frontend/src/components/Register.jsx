@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { axiosInstance } from '../axiosInstance.js'
 import { styles } from '../styles/common.js'
+import { getErrorMessage } from '../utils/errors.js'
 
 export const Register = () => {
   const [departments, setDepartments] = useState([])
@@ -11,7 +12,7 @@ export const Register = () => {
   const navigate = useNavigate()
 
   useEffect(() => {
-    axiosInstance.get('/meta-api/departments?kind=BUSINESS').then(({ data }) => setDepartments(data.payload))
+    axiosInstance.get('/meta-api/departments?kind=BUSINESS').then(({ data }) => setDepartments(data.payload)).catch((err) => toast.error(getErrorMessage(err, 'Could not load departments')))
   }, [])
 
   const handleSubmit = async (e) => {
@@ -22,7 +23,7 @@ export const Register = () => {
       toast.success('Registered! Please login.')
       navigate('/login')
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Registration failed')
+      toast.error(getErrorMessage(err, 'Registration failed'))
     } finally {
       setLoading(false)
     }

@@ -10,7 +10,7 @@ export const Home = () => {
     <div className={styles.container}>
       <div className={styles.card}>
         <h1 className={styles.h1}>ServiceDesk Pro</h1>
-        <p className="text-slate-600 mb-4">IT helpdesk & asset management — MVP build.</p>
+        <p className="text-slate-600 mb-4">IT helpdesk & asset management.</p>
         {!isAuthenticated && (
           <div className="flex gap-3">
             <Link to="/login" className={styles.btnPrimary}>Login</Link>

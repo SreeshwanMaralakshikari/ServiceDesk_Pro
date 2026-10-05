@@ -9,7 +9,8 @@ import { getErrorMessage } from '../../utils/errors.js'
 import { downloadCsv } from './downloadCsv.js'
 
 const STATUSES = Object.keys(statusColors)
-const PRIORITIES = Object.keys(priorityColors)
+// fallback until /meta-api/priorities answers
+const DEFAULT_PRIORITIES = Object.keys(priorityColors)
 const PAGE_SIZE = 15
 const BLANK = { q: '', status: '', priority: '', from: '', to: '', department: '' }
 
@@ -31,6 +32,8 @@ export const ReportsPage = () => {
   const [applied, setApplied] = useState(BLANK)
   const [page, setPage] = useState(1)
   const [busy, setBusy] = useState(false)
+  const { data: priorityData } = useFetch('/meta-api/priorities')
+  const priorityOptions = priorityData?.length ? priorityData.map((p) => p.priority) : DEFAULT_PRIORITIES
   const { data: teamData } = useFetch(isAdmin ? '/admin-api/departments' : null, { limit: 50, kind: 'IT_SUPPORT', isActive: true })
 
   const params = Object.fromEntries(Object.entries(applied).filter(([, v]) => v))
@@ -76,7 +79,7 @@ export const ReportsPage = () => {
           <label className="text-xs text-slate-500 flex flex-col gap-1">Priority
             <select className={styles.select + ' max-w-[9rem]'} value={draft.priority} onChange={set('priority')}>
               <option value="">All</option>
-              {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+              {priorityOptions.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </label>
           {isAdmin && (

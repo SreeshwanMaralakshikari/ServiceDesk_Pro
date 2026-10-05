@@ -3,13 +3,15 @@ import { fullName } from './dashboardStats.js'
 // asset numbers for the Asset Manager / Admin page. Pure, like dashboardStats.js.
 export const ASSET_STATUS_ORDER = ['PROCURED', 'IN_STOCK', 'ASSIGNED', 'IN_REPAIR', 'REPLACED', 'RETIRED']
 export const WARRANTY_WINDOW_DAYS = 30
+// assets out of service: no warranty alert or count makes sense for them
+export const NO_WARRANTY_ALERT_STATUSES = ['RETIRED', 'REPLACED']
 
 const DAY = 24 * 60 * 60 * 1000
 const sum = (values) => values.reduce((a, b) => a + (Number(b) || 0), 0)
 
 // assets: lean rows { status, type, assetClass, vendor, purchaseCost, warrantyExpiry, maintenance: [{ cost }] }
 // The warranty rule matches the warranty-expiring report and the daily check: everything that is
-// not RETIRED and whose warranty ends within the window (expired ones included) is counted.
+// not RETIRED or REPLACED and whose warranty ends within the window (expired ones included) is counted.
 export const buildAssetStats = ({ assets, vendors = [], now = new Date(), warrantyDays = WARRANTY_WINDOW_DAYS }) => {
   const cutoff = new Date(now.getTime() + warrantyDays * DAY)
   const statusCounts = new Map()
@@ -22,7 +24,7 @@ export const buildAssetStats = ({ assets, vendors = [], now = new Date(), warran
   for (const asset of assets) {
     statusCounts.set(asset.status, (statusCounts.get(asset.status) ?? 0) + 1)
     classCounts.set(asset.assetClass, (classCounts.get(asset.assetClass) ?? 0) + 1)
-    if (asset.status !== 'RETIRED' && asset.warrantyExpiry) {
+    if (!NO_WARRANTY_ALERT_STATUSES.includes(asset.status) && asset.warrantyExpiry) {
       if (asset.warrantyExpiry < now) expired++
       else if (asset.warrantyExpiry <= cutoff) expiringSoon++
     }

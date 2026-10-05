@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
 import { axiosInstance } from '../../axiosInstance.js'
+import toast from 'react-hot-toast'
 import { styles, assetStatusColors } from '../../styles/common.js'
+import { getErrorMessage } from '../../utils/errors.js'
 
 export const MyAssets = () => {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    axiosInstance.get('/asset-api/my-assets').then(({ data }) => setItems(data.payload)).finally(() => setLoading(false))
+    axiosInstance.get('/asset-api/my-assets')
+      .then(({ data }) => setItems(data.payload))
+      .catch((err) => toast.error(getErrorMessage(err, 'Failed to load your assets')))
+      .finally(() => setLoading(false))
   }, [])
 
   return (

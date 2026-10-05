@@ -1,8 +1,8 @@
 import { Schema, model, Types } from 'mongoose'
 
-// Phase 2: approvals + the full Section 6b status matrix (minus linked
-// tickets/watchers, which stay in Phase 6, and business-hours SLA math,
-// which is Phase 3 — ON_HOLD here just pauses on wall-clock time for now).
+// Tickets: approvals, the full Section 6b status matrix and the SLA clock.
+// ON_HOLD pauses the clock in business hours (see utils/businessHours.js and
+// utils/slaLifecycle.js); linked tickets and watchers are not part of this build.
 
 const commentSchema = new Schema({
   author:     { type: Types.ObjectId, ref: 'user', required: true },

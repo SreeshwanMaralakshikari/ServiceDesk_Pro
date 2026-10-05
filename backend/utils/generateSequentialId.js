@@ -9,6 +9,7 @@
 // keeps counting without gaps or repeats. The unique index on publicId stays as
 // a safety net.
 import { CounterModel } from '../models/CounterModel.js'
+import { APP_UTC_OFFSET_MINUTES } from './timezone.js'
 
 const PAD = 5
 
@@ -26,8 +27,12 @@ const highestUsed = async (Model, prefix, year) => {
 
 const bump = (key) => CounterModel.findOneAndUpdate({ _id: key }, { $inc: { seq: 1 } }, { returnDocument: 'after' })
 
+// the year as the app's own clock (IST) reads it, not the server's: Render runs in UTC, which is still
+// last year for the first 5h30 of 1 January in India
+export const yearInAppZone = (date = new Date()) => new Date(date.getTime() + APP_UTC_OFFSET_MINUTES * 60 * 1000).getUTCFullYear()
+
 export const generateSequentialId = async (Model, prefix) => {
-  const year = new Date().getFullYear()
+  const year = yearInAppZone()
   const key = `${prefix}-${year}`
 
   let counter = await bump(key)

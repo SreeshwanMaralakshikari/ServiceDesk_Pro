@@ -13,7 +13,7 @@ import { asText } from '../utils/queryParams.js'
 import { createNotification } from '../utils/createNotification.js'
 import { logAudit } from '../utils/logAudit.js'
 import { VendorModel } from '../models/VendorModel.js'
-import { buildAssetStats } from '../utils/assetStats.js'
+import { buildAssetStats, NO_WARRANTY_ALERT_STATUSES } from '../utils/assetStats.js'
 import { ROW_CAP } from '../utils/dashboardData.js'
 
 export const assetApp = exp.Router()
@@ -88,7 +88,7 @@ assetApp.get('/assets/warranty-expiring', verifyToken(...READ_ROLES), async (req
     const cutoff = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
     const assets = await AssetModel.find({
       isDeleted: false,
-      status: { $ne: 'RETIRED' },
+      status: { $nin: NO_WARRANTY_ALERT_STATUSES },
       warrantyExpiry: { $ne: null, $lte: cutoff },
     }).populate('assignedTo', 'firstName lastName').sort({ warrantyExpiry: 1 })
     //send res
@@ -105,8 +105,9 @@ assetApp.post('/assets', verifyToken(...MANAGE_ROLES), async (req, res, next) =>
       return res.status(400).json({ message: 'name, type and assetClass are required' })
     }
     const publicId = await generateSequentialId(AssetModel, 'AST')
+    // an empty select value ('') means "not chosen", so leave the reference unset instead of failing the id cast
     const asset = await AssetModel.create({
-      publicId, name, type, assetClass, serialNumber, licenseKey, vendor, purchaseDate, purchaseCost, warrantyExpiry, department, location,
+      publicId, name, type, assetClass, serialNumber, licenseKey, vendor: vendor || undefined, purchaseDate, purchaseCost, warrantyExpiry, department: department || undefined, location,
       status: 'PROCURED',
       lifecycleHistory: [{ toStatus: 'PROCURED', by: req.user.id, note: 'asset procured' }],
     })
@@ -148,16 +149,21 @@ assetApp.patch('/assets/:assetId', verifyToken(...MANAGE_ROLES), async (req, res
     if (assetClass !== undefined) asset.assetClass = assetClass
     if (serialNumber !== undefined) asset.serialNumber = serialNumber
     if (licenseKey !== undefined) asset.licenseKey = licenseKey
-    if (vendor !== undefined) asset.vendor = vendor
+    // '' clears the reference, anything else goes through the normal id cast
+    if (vendor !== undefined) asset.vendor = vendor || null
     if (purchaseDate !== undefined) asset.purchaseDate = purchaseDate
     if (purchaseCost !== undefined) asset.purchaseCost = purchaseCost
-    if (department !== undefined) asset.department = department
+    if (department !== undefined) asset.department = department || null
     if (location !== undefined) asset.location = location
     if (warrantyExpiry !== undefined) {
       asset.warrantyExpiry = warrantyExpiry
       asset.warrantyNotified = false
     }
     await asset.save()
+    // which fields were sent (names only: the values can include a licence key)
+    const fields = Object.entries({ name, assetClass, serialNumber, licenseKey, vendor, purchaseDate, purchaseCost, warrantyExpiry, department, location })
+      .filter(([, value]) => value !== undefined).map(([key]) => key)
+    await logAudit({ req, action: 'ASSET_UPDATED', entityType: 'ASSET', entity: asset, after: { fields } })
     //send res
     res.status(200).json({ message: 'asset updated', payload: asset })
   } catch (err) { next(err) }
@@ -178,6 +184,7 @@ assetApp.post('/assets/:assetId/maintenance', verifyToken(...READ_ROLES), async 
     }
     asset.maintenance.push({ type, vendor, cost, note, date: date || new Date() })
     await asset.save()
+    await logAudit({ req, action: 'ASSET_MAINTENANCE_ADDED', entityType: 'ASSET', entity: asset, after: { type } })
     //send res
     res.status(201).json({ message: 'maintenance entry added', payload: asset.maintenance[asset.maintenance.length - 1] })
   } catch (err) { next(err) }

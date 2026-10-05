@@ -48,7 +48,6 @@ export const router = createBrowserRouter([
         element: <ProtectedRoutes allowedRoles={['ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOYEE', 'ASSET_MANAGER']} />,
         children: [
           { path: 'tickets', element: <TicketList /> },
-          { path: 'tickets/new', element: <CreateTicket /> },
           { path: 'tickets/:ticketId', element: <TicketDetail /> },
           { path: 'notifications', element: <NotificationsPage /> },
           { path: 'account/password', element: <ChangePassword /> },
@@ -56,6 +55,11 @@ export const router = createBrowserRouter([
           { path: 'kb', element: <KnowledgeBase /> },
           { path: 'kb/:articleId', element: <ArticleDetail /> },
         ],
+      },
+      {
+        // same roles the backend allows for POST /tickets
+        element: <ProtectedRoutes allowedRoles={['EMPLOYEE', 'ADMIN']} />,
+        children: [{ path: 'tickets/new', element: <CreateTicket /> }],
       },
       {
         // authoring — react-router ranks the static `kb/new` above the dynamic

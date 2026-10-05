@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
 import { styles } from '../../styles/common.js'
+import { getErrorMessage } from '../../utils/errors.js'
 
 export const CreateAsset = () => {
   const [vendors, setVendors] = useState([])
@@ -21,11 +22,13 @@ export const CreateAsset = () => {
     e.preventDefault()
     setLoading(true)
     try {
-      const { data } = await axiosInstance.post('/asset-api/assets', form)
+      // leave empty optional fields out of the body (an empty vendor id cannot be cast on the server)
+      const body = Object.fromEntries(Object.entries(form).filter(([, value]) => value !== ''))
+      const { data } = await axiosInstance.post('/asset-api/assets', body)
       toast.success(`Asset ${data.payload.publicId} created`)
       navigate(`/assets/${data.payload.publicId}`)
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to create asset')
+      toast.error(getErrorMessage(err, 'Failed to create asset'))
     } finally {
       setLoading(false)
     }

@@ -106,6 +106,7 @@ Content-Type: application/json
 { "version": 0, "note": "ready for review" }
 
 ### request review on a PUBLISHED article -> 400
+### request review again while one is already waiting -> 400 "a review was already requested for this article"
 ### request review on someone else's draft as a technician -> 403
 
 ### drafts waiting for a manager (MANAGER/ADMIN only; anyone else -> 403)

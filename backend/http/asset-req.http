@@ -21,6 +21,8 @@ Content-Type: application/json
   "warrantyExpiry": "2027-01-01"
 }
 
+### vendor and department are optional: leave them out (or send "") for an asset with no supplier
+
 ### full lifecycle walk (replace PASTE_ASSET_ID with the publicId, e.g. AST-2026-00005)
 
 ### PROCURED -> IN_STOCK

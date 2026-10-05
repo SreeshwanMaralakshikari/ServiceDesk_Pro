@@ -105,7 +105,7 @@ const countBy = (rows, keyOf) => {
 }
 
 // the numbers every audience shares (manager, team, technician, admin)
-const summarize = (rows, { from, now }) => {
+const summarize = (rows, { from }) => {
   const created = rows.filter((r) => inWindow(r.ticket.createdAt, from))
   const resolved = rows.filter((r) => inWindow(r.ticket.resolution?.resolvedAt, from))
   const closed = rows.filter((r) => inWindow(r.ticket.closedAt, from))

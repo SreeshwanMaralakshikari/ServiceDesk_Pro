@@ -5,6 +5,7 @@ import { getTechnicianStats } from './technicianStats.js'
 import { pickTechnician } from './dsa/techHeap.js'
 import { createNotification } from './createNotification.js'
 import { logAudit } from './logAudit.js'
+import { fullName } from './dashboardStats.js'
 
 // Assigns a fresh OPEN ticket to the best technician of its team when the
 // category has autoAssign switched on. It never throws and never blocks the
@@ -27,7 +28,7 @@ export const autoAssignTicket = async (ticket) => {
     const result = await atomicTransition({
       Model: TicketModel, doc: ticket, action: 'auto-assign', noun: 'ticket', from: ['OPEN'], version: ticket.version,
       set: { status: 'ASSIGNED', assignedTo: chosen.id, assignedAt: now, assignmentMethod: 'AUTO' },
-      push: { statusHistory: { from: 'OPEN', to: 'ASSIGNED', note: `auto-assigned to ${chosen.firstName} ${chosen.lastName}`, at: now } },
+      push: { statusHistory: { from: 'OPEN', to: 'ASSIGNED', note: `auto-assigned to ${fullName(chosen)}`, at: now } },
     })
     if (result.error) return null
 

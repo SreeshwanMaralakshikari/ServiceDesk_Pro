@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
 import { styles } from '../../styles/common.js'
+import { getErrorMessage } from '../../utils/errors.js'
 
 export const VendorList = () => {
   const [vendors, setVendors] = useState([])
@@ -10,7 +11,10 @@ export const VendorList = () => {
   const [creating, setCreating] = useState(false)
 
   const load = () => {
-    axiosInstance.get('/vendor-api/vendors').then(({ data }) => setVendors(data.payload)).finally(() => setLoading(false))
+    axiosInstance.get('/vendor-api/vendors')
+      .then(({ data }) => setVendors(data.payload))
+      .catch((err) => toast.error(getErrorMessage(err, 'Failed to load vendors')))
+      .finally(() => setLoading(false))
   }
   useEffect(load, [])
 
@@ -24,7 +28,7 @@ export const VendorList = () => {
       setForm({ name: '', contactPerson: '', email: '', phone: '', servicesProvided: '' })
       load()
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to add vendor')
+      toast.error(getErrorMessage(err, 'Failed to add vendor'))
     } finally {
       setCreating(false)
     }
@@ -35,7 +39,7 @@ export const VendorList = () => {
       await axiosInstance.patch(`/vendor-api/vendors/${vendor._id}`, { isActive: !vendor.isActive })
       load()
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to update vendor')
+      toast.error(getErrorMessage(err, 'Failed to update vendor'))
     }
   }
 

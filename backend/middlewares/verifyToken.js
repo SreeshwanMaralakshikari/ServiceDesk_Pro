@@ -1,10 +1,8 @@
 import jwt from 'jsonwebtoken'
-import { config } from 'dotenv'
 import { UserModel } from '../models/UserModel.js'
 import { tokenIsStale } from '../utils/sessionRules.js'
 
 const { verify } = jwt
-config()
 
 // factory: verifyToken("ADMIN", "MANAGER") -> middleware allowing only those roles
 // (call with no args to just require any authenticated, active user)
@@ -38,7 +36,7 @@ export const verifyToken = (...allowedRoles) => {
 
       req.user = { id: user._id.toString(), role: user.role, department: user.department?.toString() }
       next()
-    } catch (err) {
+    } catch {
       //send res
       res.status(401).json({ message: 'Session expired, please login again' })
     }

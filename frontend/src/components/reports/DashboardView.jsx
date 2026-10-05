@@ -56,7 +56,7 @@ export const DashboardView = ({ data, showTeams = false }) => {
         <StatCard label="Resolved" value={totals.resolved} hint={period} />
         <StatCard label="Closed" value={totals.closed} hint={period} />
         <StatCard label="Open now" value={totals.open} />
-        <StatCard label="Reopened now" value={totals.reopened} />
+        <StatCard label="Reopened" value={totals.reopened} hint={period} />
       </section>
 
       <div className="grid md:grid-cols-2 gap-4">

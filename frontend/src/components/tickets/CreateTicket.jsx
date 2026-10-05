@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
+import { useAuthStore } from '../../store/authStore.js'
 import { styles } from '../../styles/common.js'
 import { getErrorMessage } from '../../utils/errors.js'
 
@@ -13,6 +14,7 @@ export const CreateTicket = () => {
   const [suggesting, setSuggesting] = useState(false)
   const [suggestion, setSuggestion] = useState(null) // { source: 'ai'|'fallback', probableIssue, categoryId } | null
   const navigate = useNavigate()
+  const isAdmin = useAuthStore((s) => s.user?.role === 'ADMIN')
 
   const suggest = async () => {
     if (!form.title.trim() && !form.description.trim()) {
@@ -35,8 +37,8 @@ export const CreateTicket = () => {
   }
 
   useEffect(() => {
-    axiosInstance.get('/meta-api/categories').then(({ data }) => setCategories(data.payload))
-    axiosInstance.get('/meta-api/priorities').then(({ data }) => setPriorities(data.payload))
+    axiosInstance.get('/meta-api/categories').then(({ data }) => setCategories(data.payload)).catch((err) => toast.error(getErrorMessage(err, 'Could not load categories')))
+    axiosInstance.get('/meta-api/priorities').then(({ data }) => setPriorities(data.payload)).catch((err) => toast.error(getErrorMessage(err, 'Could not load priorities')))
   }, [])
 
   const handleSubmit = async (e) => {
@@ -83,7 +85,8 @@ export const CreateTicket = () => {
             <label className={styles.label}>Priority (optional — defaults to the category's)</label>
             <select className={styles.select} value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
               <option value="">Use category default</option>
-              {priorities.filter((p) => p.level > 0).map((p) => <option key={p._id} value={p.priority}>{p.label}</option>)}
+              {/* the level-0 TEST priority is for demos: the server only accepts it from an admin */}
+              {priorities.filter((p) => p.level > 0 || isAdmin).map((p) => <option key={p._id} value={p.priority}>{p.label}</option>)}
             </select>
           </div>
           {suggestion && (

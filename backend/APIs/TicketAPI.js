@@ -21,6 +21,7 @@ import { createNotification, notifyMany } from '../utils/createNotification.js'
 import { logAudit } from '../utils/logAudit.js'
 import { WorkLogModel } from '../models/WorkLogModel.js'
 import { getTechnicianStats } from '../utils/technicianStats.js'
+import { fullName } from '../utils/dashboardStats.js'
 import { autoAssignTicket } from '../utils/autoAssign.js'
 import { rankTechnicians, matchedSkills } from '../utils/dsa/techHeap.js'
 import { findSimilar } from '../utils/dsa/similarity.js'
@@ -312,7 +313,7 @@ ticketApp.get('/tickets/:ticketId/timeline', verifyToken(...ALL_ROLES), async (r
     ticket.comments.forEach((c) => people.add(String(c.author)))
     workLogs.forEach((w) => people.add(String(w.technician)))
     const users = await UserModel.find({ _id: { $in: [...people] } }).select('firstName lastName role').lean()
-    const nameOf = new Map(users.map((u) => [String(u._id), { name: `${u.firstName} ${u.lastName}`, role: u.role }]))
+    const nameOf = new Map(users.map((u) => [String(u._id), { name: fullName(u), role: u.role }]))
     const who = (id) => (id ? nameOf.get(String(id)) ?? null : null)
 
     const history = ticket.statusHistory.map((h) => ({ type: 'STATUS', at: h.at, by: who(h.by), from: h.from, to: h.to, note: h.note }))
@@ -631,7 +632,10 @@ ticketApp.patch('/tickets/:ticketId/:action', verifyToken(...ALL_ROLES), async (
       // new SLA cycle from now — response SLA isn't re-run (first response
       // already happened), only resolutionDueAt/warnAt restart; a breach
       // from the cycle that just ended is banked into pastBreaches
-      const policy = await SLAPolicyModel.findOne({ priority: ticket.priority, isActive: true })
+      // the policy the ticket was already running on, even if an admin switched that priority off since;
+      // only a ticket with no stored policy falls back to the active one for its priority
+      const policy = (ticket.sla.policy ? await SLAPolicyModel.findById(ticket.sla.policy) : null)
+        ?? await SLAPolicyModel.findOne({ priority: ticket.priority, isActive: true })
       const settings = await getOrgSettings()
       const clock = startSlaClock(now, policy, settings.businessHours)
       set.reopenCount = (ticket.reopenCount || 0) + 1

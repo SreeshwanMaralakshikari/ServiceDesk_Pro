@@ -1,6 +1,6 @@
 // Full Section 6b status matrix (linked-ticket/duplicate closing and
-// watchers stay out per PLAN.md Phase 6; ON_HOLD pause math here is
-// simple wall-clock — the business-hours version is Phase 3).
+// watchers are not part of this build). ON_HOLD pausing is counted in
+// business hours by the route handlers (see utils/businessHours.js).
 //
 // `to: null` means "no status change" (used by reassign, which only
 // moves assignedTo).

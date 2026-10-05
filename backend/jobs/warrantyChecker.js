@@ -2,6 +2,7 @@ import { AssetModel } from '../models/AssetModel.js'
 import { UserModel } from '../models/UserModel.js'
 import { notifyMany } from '../utils/createNotification.js'
 import { cronStatus } from './status.js'
+import { NO_WARRANTY_ALERT_STATUSES } from '../utils/assetStats.js'
 
 const WARRANTY_WINDOW_DAYS = 30
 
@@ -11,7 +12,7 @@ export const runWarrantyCheck = async () => {
   const cutoff = new Date(Date.now() + WARRANTY_WINDOW_DAYS * 24 * 60 * 60 * 1000)
   const assets = await AssetModel.find({
     isDeleted: false,
-    status: { $ne: 'RETIRED' },
+    status: { $nin: NO_WARRANTY_ALERT_STATUSES },
     warrantyNotified: false,
     warrantyExpiry: { $ne: null, $lte: cutoff },
   })
@@ -25,7 +26,7 @@ export const runWarrantyCheck = async () => {
     if (result.modifiedCount) {
       await notifyMany(recipientIds, {
         type: 'WARRANTY_EXPIRING',
-        message: `Asset ${asset.publicId} (${asset.name}) warranty expires ${asset.warrantyExpiry.toDateString()}`,
+        message: `Asset ${asset.publicId} (${asset.name}) warranty ${asset.warrantyExpiry < new Date() ? 'expired' : 'expires'} ${asset.warrantyExpiry.toDateString()}`,
         link: `/assets/${asset.publicId}`,
       })
     }

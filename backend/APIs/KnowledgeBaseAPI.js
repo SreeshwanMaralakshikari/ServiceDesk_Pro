@@ -18,6 +18,7 @@ export const kbApp = exp.Router()
 const ALL_ROLES = ['ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOYEE', 'ASSET_MANAGER']
 const WRITE_ROLES = ['TECHNICIAN', 'MANAGER', 'ADMIN']
 const ELEVATED_ROLES = ['MANAGER', 'ADMIN']
+const KB_ACTION_MESSAGES = { 'request-review': 'review requested', publish: 'article published', archive: 'article archived', restore: 'article restored' }
 
 // an article not yet PUBLISHED (or ARCHIVED) is only visible to its author
 // or a Manager/Admin — everyone else gets a 404 (not 403) so a restricted
@@ -217,6 +218,8 @@ kbApp.patch('/articles/:articleId', verifyToken(...WRITE_ROLES), async (req, res
     if (content !== undefined) article.content = content
     if (cleanTags !== undefined) article.tags = cleanTags
     await article.save()
+    const fields = Object.entries({ title, summary, content, categoryId, tags }).filter(([, value]) => value !== undefined).map(([key]) => key)
+    await logAudit({ req, action: 'KB_UPDATED', entityType: 'KB_ARTICLE', entity: article, after: { fields } })
     //send res
     res.status(200).json({ message: 'article updated', payload: toArticleView(article, req.user) })
   } catch (err) { next(err) }
@@ -285,6 +288,12 @@ kbApp.patch('/articles/:articleId/:action', verifyToken(...WRITE_ROLES), async (
       return res.status(409).json({ message: 'article was updated by someone else, please refresh' })
     }
 
+    // asking again would notify the managers a second time
+    if (action === 'request-review' && article.reviewRequestedAt) {
+      //send res
+      return res.status(400).json({ message: 'a review was already requested for this article' })
+    }
+
     const now = new Date()
     const set = {}
     const unset = {}
@@ -318,7 +327,7 @@ kbApp.patch('/articles/:articleId/:action', verifyToken(...WRITE_ROLES), async (
       })
     }
     //send res
-    res.status(200).json({ message: action === 'request-review' ? 'review requested' : `article ${action}ed`, payload: toArticleView(result.doc, req.user) })
+    res.status(200).json({ message: KB_ACTION_MESSAGES[action], payload: toArticleView(result.doc, req.user) })
   } catch (err) { next(err) }
 })
 
@@ -371,6 +380,7 @@ kbApp.delete('/articles/:articleId', verifyToken(...WRITE_ROLES), async (req, re
     }
     article.isDeleted = true
     await article.save()
+    await logAudit({ req, action: 'KB_DELETED', entityType: 'KB_ARTICLE', entity: article, before: { status: article.status } })
     //send res
     res.status(200).json({ message: 'article deleted' })
   } catch (err) { next(err) }
