@@ -25,6 +25,7 @@ export const ChartCard = ({ title, subtitle, chart, table, className = '' }) => 
 
 // the plain table used for the table view
 export const SimpleTable = ({ columns, rows }) => (
+  <div className="overflow-x-auto -mx-2 px-2">
   <table className="w-full text-sm text-left">
     <thead>
       <tr className="border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wide">
@@ -39,4 +40,5 @@ export const SimpleTable = ({ columns, rows }) => (
       ))}
     </tbody>
   </table>
+  </div>
 )

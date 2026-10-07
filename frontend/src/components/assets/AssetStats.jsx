@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { AlertTriangle, CalendarClock, Download, List } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useFetch } from '../../hooks/useFetch.js'
-import { Spinner } from '../common/Spinner.jsx'
+import { StatSkeleton } from '../common/Skeleton.jsx'
+import { ErrorState } from '../common/ErrorState.jsx'
+import { AssetStatusBadge } from '../common/Badges.jsx'
+import { assetStatusLabel } from '../../utils/labels.js'
 import { StatCard, ChartCard, SimpleTable, BarList } from '../common/charts/index.js'
 import { styles } from '../../styles/common.js'
 import { getErrorMessage } from '../../utils/errors.js'
@@ -11,7 +15,7 @@ import { downloadCsv } from '../reports/downloadCsv.js'
 const money = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`
 
 export const AssetStats = () => {
-  const { data, loading, error } = useFetch('/asset-api/stats')
+  const { data, loading, error, reload } = useFetch('/asset-api/stats')
   const [busy, setBusy] = useState(false)
 
   const exportCsv = async () => {
@@ -28,27 +32,27 @@ export const AssetStats = () => {
 
   return (
     <div className={styles.containerWide}>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h1 className={styles.h1 + ' mb-0'}>Asset overview</h1>
-        <div className="flex gap-2">
-          <Link to="/assets" className={styles.btnSecondary}>Asset list</Link>
-          <button className={styles.btnPrimary} onClick={exportCsv} disabled={busy}>{busy ? 'Preparing…' : 'Download CSV'}</button>
+        <div className="flex flex-wrap gap-2">
+          <Link to="/assets" className={styles.btnSecondary}><List className="h-4 w-4" aria-hidden="true" />Asset list</Link>
+          <button className={styles.btnPrimary} onClick={exportCsv} disabled={busy}><Download className="h-4 w-4" aria-hidden="true" />{busy ? 'Preparing…' : 'Download CSV'}</button>
         </div>
       </div>
-      {loading && <Spinner />}
-      {error && <p className="text-red-600 text-sm">{error}</p>}
+      {loading && !data && <StatSkeleton />}
+      {error && <div className={styles.card}><ErrorState message={error} onRetry={reload} /></div>}
       {data && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard label="Total assets" value={data.total} />
-            <StatCard label="Warranty ending soon" icon="◔" tone={data.warranty.expiringSoon ? 'warn' : 'neutral'} value={data.warranty.expiringSoon} hint={`within ${data.warranty.windowDays} days`} />
-            <StatCard label="Warranty expired" icon="⚠" tone={data.warranty.expired ? 'bad' : 'neutral'} value={data.warranty.expired} hint="not retired" />
+            <StatCard label="Warranty ending soon" icon={CalendarClock} tone={data.warranty.expiringSoon ? 'warn' : 'neutral'} value={data.warranty.expiringSoon} hint={`within ${data.warranty.windowDays} days`} />
+            <StatCard label="Warranty expired" icon={AlertTriangle} tone={data.warranty.expired ? 'bad' : 'neutral'} value={data.warranty.expired} hint="not retired" />
             <StatCard label="Purchase value" value={money(data.cost.purchaseTotal)} hint={`maintenance ${money(data.cost.maintenanceTotal)} (${data.cost.maintenanceEntries} entries)`} />
           </div>
           <div className="grid md:grid-cols-2 gap-4">
             <ChartCard title="By status"
-              chart={<BarList items={data.byStatus.map((s) => ({ label: s.status.replace('_', ' '), value: s.count, hint: `${s.count} ${s.status}` }))} />}
-              table={<SimpleTable columns={[{ key: 'status', header: 'Status' }, { key: 'count', header: 'Assets', align: 'right' }]} rows={data.byStatus} />} />
+              chart={<BarList items={data.byStatus.map((s) => ({ label: assetStatusLabel(s.status), value: s.count, hint: `${s.count} ${assetStatusLabel(s.status).toLowerCase()}` }))} />}
+              table={<SimpleTable columns={[{ key: 'status', header: 'Status', render: (r) => <AssetStatusBadge status={r.status} /> }, { key: 'count', header: 'Assets', align: 'right' }]} rows={data.byStatus} />} />
             <ChartCard title="By class"
               chart={<BarList items={data.byClass.map((c) => ({ label: c.assetClass, value: c.count, hint: `${c.count} ${c.assetClass}` }))} />}
               table={<SimpleTable columns={[{ key: 'assetClass', header: 'Class' }, { key: 'count', header: 'Assets', align: 'right' }]} rows={data.byClass} />} />

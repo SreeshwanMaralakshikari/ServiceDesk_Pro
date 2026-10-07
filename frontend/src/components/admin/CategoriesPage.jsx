@@ -13,6 +13,7 @@ import { TagInput } from '../common/TagInput.jsx'
 import { ActiveBadge, FlagBadge } from '../common/FlagBadge.jsx'
 import { PriorityBadge } from '../common/Badges.jsx'
 import { styles } from '../../styles/common.js'
+import { Plus, Tags } from 'lucide-react'
 
 const sameList = (a = [], b = []) => a.length === b.length && a.every((x, i) => x === b[i])
 
@@ -107,12 +108,12 @@ export const CategoriesPage = () => {
 
   const columns = [
     { key: 'name', header: 'Category', render: (c) => <div><p className="font-medium">{c.name}</p>{c.description && <p className="text-xs text-slate-400">{c.description}</p>}</div> },
-    { key: 'department', header: 'Team', render: (c) => c.department?.name },
-    { key: 'ticketType', header: 'Type', render: (c) => (c.ticketType === 'INCIDENT' ? 'Incident' : 'Request') },
+    { key: 'department', header: 'Team', className: 'hidden md:table-cell', render: (c) => c.department?.name },
+    { key: 'ticketType', header: 'Type', className: 'hidden lg:table-cell', render: (c) => (c.ticketType === 'INCIDENT' ? 'Incident' : 'Request') },
     { key: 'defaultPriority', header: 'Priority', render: (c) => <PriorityBadge priority={c.defaultPriority} /> },
     { key: 'requiresApproval', header: 'Approval', render: (c) => <FlagBadge on={c.requiresApproval} onLabel="Required" offLabel="No" /> },
     { key: 'autoAssign', header: 'Auto-assign', render: (c) => <FlagBadge on={c.autoAssign} onLabel="On" offLabel="Off" /> },
-    { key: 'skills', header: 'Skills', render: (c) => <div className="flex flex-wrap gap-1">{c.skills?.map((s) => <span key={s} className={styles.chip}>{s}</span>)}</div> },
+    { key: 'skills', header: 'Skills', className: 'hidden lg:table-cell', render: (c) => <div className="flex flex-wrap gap-1">{c.skills?.map((s) => <span key={s} className={styles.chip}>{s}</span>)}</div> },
     { key: 'isActive', header: 'Status', render: (c) => <ActiveBadge isActive={c.isActive} /> },
     { key: 'actions', header: '', render: (c) => (
       <div className="flex gap-3 justify-end whitespace-nowrap">
@@ -124,9 +125,9 @@ export const CategoriesPage = () => {
 
   return (
     <div className={styles.card}>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h2 className={styles.h2 + ' mb-0'}>Ticket categories</h2>
-        <button className={styles.btnPrimary} onClick={() => setEditing('new')}>+ New category</button>
+        <button className={styles.btnPrimary} onClick={() => setEditing('new')}><Plus className="h-4 w-4" aria-hidden="true" />New category</button>
       </div>
       <div className="mb-4">
         <select className={styles.select + ' max-w-[14rem]'} value={team} onChange={(e) => { setPage(1); setTeam(e.target.value) }} aria-label="Filter by team">
@@ -134,8 +135,8 @@ export const CategoriesPage = () => {
           {teams.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
         </select>
       </div>
-      <DataTable columns={columns} rows={data?.items} loading={loading} error={error}
-        page={data?.page} totalPages={data?.totalPages} total={data?.total} onPageChange={setPage} emptyTitle="No categories" />
+      <DataTable columns={columns} rows={data?.items} loading={loading} error={error} onRetry={reload}
+        page={data?.page} totalPages={data?.totalPages} total={data?.total} onPageChange={setPage} emptyTitle="No categories" emptyIcon={Tags} />
       {editing && (
         <CategoryFormModal category={editing === 'new' ? null : editing} teams={teams} priorities={priorities} onClose={() => setEditing(null)}
           onSaved={(message) => { setEditing(null); reload(); toast.success(message) }} />

@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useAuthStore } from '../../store/authStore.js'
 import { styles } from '../../styles/common.js'
+import { PageSkeleton } from '../common/Skeleton.jsx'
 import { getErrorMessage } from '../../utils/errors.js'
 
 // mirror the server's schema caps so people hit a friendly limit, not a 400
@@ -57,7 +58,7 @@ export const ArticleForm = () => {
     }
   }
 
-  if (loadingArticle) return <div className={styles.container}><p className="text-slate-500">Loading…</p></div>
+  if (loadingArticle) return <PageSkeleton />
 
   return (
     <div className={styles.container}>

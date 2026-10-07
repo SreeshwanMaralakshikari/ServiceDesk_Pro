@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import toast from 'react-hot-toast'
+import { Star } from 'lucide-react'
 import { axiosInstance } from '../../axiosInstance.js'
 import { styles } from '../../styles/common.js'
 import { getErrorMessage } from '../../utils/errors.js'
@@ -45,8 +46,8 @@ export const CsatPanel = ({ ticket, isRequester, onSaved }) => {
   }
 
   return (
-    <div className="mb-6 border-t border-slate-100 pt-4">
-      <h2 className={styles.h2}>Customer satisfaction</h2>
+    <section className={styles.card} aria-label="Customer satisfaction">
+      <h2 className={styles.h2 + ' flex items-center gap-2'}><Star className="h-4 w-4 text-amber-400" aria-hidden="true" />Customer satisfaction</h2>
       {rated || (!closedConfirmed && ticket.csat?.rating) ? (
         <div>
           <Stars value={ticket.csat.rating} />
@@ -63,6 +64,6 @@ export const CsatPanel = ({ ticket, isRequester, onSaved }) => {
           <button className={styles.btnPrimary} disabled={saving} type="submit">{saving ? 'Sending…' : 'Submit rating'}</button>
         </form>
       )}
-    </div>
+    </section>
   )
 }

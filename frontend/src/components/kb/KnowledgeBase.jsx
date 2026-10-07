@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { BookOpen, Eye, Plus, Search, ThumbsUp } from 'lucide-react'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useAuthStore } from '../../store/authStore.js'
-import { styles, kbStatusColors } from '../../styles/common.js'
+import { styles } from '../../styles/common.js'
+import { DataTable } from '../common/DataTable.jsx'
+import { KbStatusBadge } from '../common/Badges.jsx'
 import { getErrorMessage } from '../../utils/errors.js'
 
 const STAFF_ROLES = ['TECHNICIAN', 'MANAGER', 'ADMIN']
@@ -54,6 +57,29 @@ export const KnowledgeBase = () => {
     return () => { cancelled = true }
   }, [applied, page, mine])
 
+  const columns = [
+    { key: 'publicId', header: 'ID', className: 'hidden sm:table-cell', render: (a) => <span className="font-mono text-xs whitespace-nowrap">{a.publicId}</span> },
+    { key: 'title', header: 'Article', render: (a) => (
+      <div>
+        <div className="font-medium text-slate-800">{a.title}</div>
+        <div className="text-xs text-slate-500">{a.summary}</div>
+      </div>
+    ) },
+    { key: 'category', header: 'Category', className: 'hidden md:table-cell', render: (a) => a.category?.name || '—' },
+    ...(!mine ? [{ key: 'views', header: 'Views', render: (a) => (
+      <span className="inline-flex items-center gap-3 text-slate-600 whitespace-nowrap">
+        <span className="inline-flex items-center gap-1" title="Views"><Eye className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />{a.viewCount}</span>
+        {a.helpfulCount > 0 && <span className="inline-flex items-center gap-1 text-xs" title="Found helpful"><ThumbsUp className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />{a.helpfulCount}</span>}
+      </span>
+    ) }] : []),
+    ...(isStaff ? [{ key: 'status', header: 'Status', render: (a) => (
+      <div className="flex flex-wrap gap-1">
+        <KbStatusBadge status={a.status} />
+        {a.status === 'DRAFT' && a.reviewRequestedAt && <span className={`${styles.badge} bg-amber-100 text-amber-800 whitespace-nowrap`}>Review requested</span>}
+      </div>
+    ) }] : []),
+  ]
+
   const submitSearch = (e) => {
     e.preventDefault()
     setPage(1)
@@ -66,20 +92,24 @@ export const KnowledgeBase = () => {
 
   return (
     <div className={styles.container}>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h1 className={styles.h1 + ' mb-0'}>Knowledge Base</h1>
-        {isStaff && <Link to="/kb/new" className={styles.btnPrimary}>+ New article</Link>}
+        {isStaff && <Link to="/kb/new" className={styles.btnPrimary}><Plus className="h-4 w-4" aria-hidden="true" />New article</Link>}
       </div>
 
       <div className={styles.card + ' mb-4'}>
         <form onSubmit={submitSearch} className="flex flex-wrap gap-2">
-          <input
-            className={styles.input + ' flex-1 min-w-48'}
-            placeholder="Search articles (e.g. vpn, printer, password)…"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            disabled={mine}
-          />
+          <div className="relative flex-1 min-w-48">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" aria-hidden="true" />
+            <input
+              className={styles.input + ' pl-9'}
+              placeholder="Search articles (e.g. vpn, printer, password)…"
+              aria-label="Search articles"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              disabled={mine}
+            />
+          </div>
           <select className={styles.select + ' w-44'} value={applied.category} onChange={(e) => changeFilter('category', e.target.value)} disabled={mine}>
             <option value="">All categories</option>
             {categories.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
@@ -108,47 +138,12 @@ export const KnowledgeBase = () => {
       </div>
 
       <div className={styles.card}>
-        {loading && <p className="text-slate-500">Loading…</p>}
-        {!loading && items.length === 0 && <p className="text-slate-500">No articles found.</p>}
-        {!loading && items.length > 0 && (
-          <table className={styles.table}>
-            <thead>
-              <tr className={styles.tableHeadRow}>
-                <th className="py-2">ID</th>
-                <th className="py-2">Article</th>
-                <th className="py-2">Category</th>
-                {!mine && <th className="py-2">Views</th>}
-                {isStaff && <th className="py-2">Status</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((a) => (
-                <tr key={a._id} className={styles.tableRow} onClick={() => navigate(`/kb/${a.publicId}`)}>
-                  <td className="py-2 font-mono text-xs align-top">{a.publicId}</td>
-                  <td className="py-2">
-                    <div className="font-medium">{a.title}</div>
-                    <div className="text-xs text-slate-500">{a.summary}</div>
-                  </td>
-                  <td className="py-2 align-top">{a.category?.name || '—'}</td>
-                  {!mine && <td className="py-2 align-top">{a.viewCount}{a.helpfulCount > 0 && <span className="text-xs text-slate-500"> · 👍 {a.helpfulCount}</span>}</td>}
-                  {isStaff && (
-                    <td className="py-2 align-top">
-                      <span className={`${styles.badge} ${kbStatusColors[a.status] || ''}`}>{a.status}</span>
-                      {a.status === 'DRAFT' && a.reviewRequestedAt && <span className={`${styles.badge} bg-amber-100 text-amber-800 ml-1`}>Review requested</span>}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {!mine && totalPages > 1 && (
-          <div className="flex items-center justify-between mt-4">
-            <button className={styles.btnSecondary} disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</button>
-            <span className="text-sm text-slate-500">Page {page} of {totalPages}</span>
-            <button className={styles.btnSecondary} disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</button>
-          </div>
-        )}
+        <DataTable columns={columns} rows={items} loading={loading}
+          onRowClick={(a) => navigate(`/kb/${a.publicId}`)}
+          page={page} totalPages={mine ? 1 : totalPages} onPageChange={setPage}
+          emptyTitle={mine ? 'You have not written any articles yet' : 'No articles found'}
+          emptyHint={mine ? 'Start one with “New article”.' : applied.q || applied.category || applied.status || applied.review ? 'Try other words or clear the filters.' : undefined}
+          emptyIcon={BookOpen} />
       </div>
     </div>
   )

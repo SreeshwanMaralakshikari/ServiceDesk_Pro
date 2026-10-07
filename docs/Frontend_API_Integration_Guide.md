@@ -32,7 +32,7 @@
 | GET | `/meta-api/priorities` | `components/reports/ReportsPage.jsx`, `components/tickets/CreateTicket.jsx`, `components/tickets/TicketDetail.jsx` |
 | GET | `/ticket-api/team-technicians` | `components/tickets/TicketDetail.jsx` |
 | POST | `/ticket-api/tickets` | `components/tickets/CreateTicket.jsx` |
-| GET | `/ticket-api/tickets` | `components/tickets/ApprovalsInbox.jsx`, `components/tickets/TicketList.jsx` |
+| GET | `/ticket-api/tickets` | `components/home/Welcome.jsx`, `components/tickets/ApprovalsInbox.jsx`, `components/tickets/TicketList.jsx` |
 | GET | `/ticket-api/tickets/:ticketId` | `components/tickets/TicketDetail.jsx` |
 | GET | `/ticket-api/tickets/:ticketId/suggested-technicians` | `components/tickets/TicketDetail.jsx` |
 | GET | `/ticket-api/tickets/:ticketId/similar` | `components/tickets/SimilarPanel.jsx` |
@@ -60,13 +60,13 @@
 | PUT | `/admin-api/org-settings` | `components/admin/SettingsPage.jsx` |
 | GET | `/admin-api/dashboard` | `components/admin/AdminDashboard.jsx` |
 | GET | `/notification-api/my-notifications` | `components/notifications/NotificationBell.jsx`, `components/notifications/NotificationsPage.jsx` |
-| GET | `/notification-api/unread-count` | `components/notifications/NotificationBell.jsx` |
+| GET | `/notification-api/unread-count` | `components/home/Welcome.jsx`, `components/notifications/NotificationBell.jsx` |
 | PUT | `/notification-api/mark-read/:id` | `components/notifications/NotificationBell.jsx`, `components/notifications/NotificationsPage.jsx` |
 | PUT | `/notification-api/mark-all-read` | `components/notifications/NotificationBell.jsx`, `components/notifications/NotificationsPage.jsx` |
 | GET | `/asset-api/assignable-users` | `components/assets/AssetDetail.jsx` |
 | GET | `/asset-api/my-assets` | `components/assets/MyAssets.jsx`, `components/tickets/RelatedAssetPanel.jsx` |
 | GET | `/asset-api/assets` | `components/assets/AssetDetail.jsx`, `components/assets/AssetList.jsx` |
-| GET | `/asset-api/stats` | `components/assets/AssetStats.jsx` |
+| GET | `/asset-api/stats` | `components/assets/AssetStats.jsx`, `components/home/Welcome.jsx` |
 | GET | `/asset-api/assets/warranty-expiring` | `components/assets/AssetList.jsx` |
 | POST | `/asset-api/assets` | `components/assets/CreateAsset.jsx` |
 | GET | `/asset-api/assets/:assetId` | `components/assets/AssetDetail.jsx` |
@@ -92,7 +92,7 @@
 | GET | `/ai-api/kb-suggestions/:ticketId` | `components/tickets/TicketDetail.jsx` |
 | POST | `/worklog-api/:ticketId` | `components/tickets/WorkLogPanel.jsx` |
 | GET | `/worklog-api/:ticketId` | `components/tickets/WorkLogPanel.jsx` |
-| GET | `/tech-api/queue` | `components/tech/MyQueue.jsx` |
+| GET | `/tech-api/queue` | `components/home/Welcome.jsx`, `components/tech/MyQueue.jsx` |
 | GET | `/tech-api/dashboard` | `components/tech/TechDashboard.jsx` |
 | GET | `/manager-api/dashboard` | `components/reports/ManagerDashboard.jsx` |
 | GET | `/report-api/tickets` | `components/reports/ReportsPage.jsx` |
@@ -116,6 +116,7 @@
 | `components/assets/AssetStats.jsx` | `GET /asset-api/stats`<br>`GET /report-api/assets.csv` |
 | `components/assets/CreateAsset.jsx` | `GET /vendor-api/vendors`<br>`POST /asset-api/assets` |
 | `components/assets/MyAssets.jsx` | `GET /asset-api/my-assets` |
+| `components/home/Welcome.jsx` | `GET /ticket-api/tickets`<br>`GET /tech-api/queue`<br>`GET /asset-api/stats`<br>`GET /notification-api/unread-count` |
 | `components/kb/ArticleDetail.jsx` | `GET /kb-api/articles/:articleId`<br>`GET /kb-api/articles/:articleId/history`<br>`PATCH /kb-api/articles/:articleId/:action`<br>`PUT /kb-api/articles/:articleId/helpful`<br>`DELETE /kb-api/articles/:articleId` |
 | `components/kb/ArticleForm.jsx` | `GET /meta-api/categories`<br>`GET /kb-api/articles/:articleId`<br>`PATCH /kb-api/articles/:articleId`<br>`POST /kb-api/articles` |
 | `components/kb/KnowledgeBase.jsx` | `GET /meta-api/categories`<br>`GET /kb-api/articles/mine`<br>`GET /kb-api/articles` |

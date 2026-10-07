@@ -11,6 +11,7 @@ import { Modal, ModalFooter } from '../common/Modal.jsx'
 import { Field, CheckboxField } from '../common/Field.jsx'
 import { ActiveBadge, FlagBadge } from '../common/FlagBadge.jsx'
 import { styles } from '../../styles/common.js'
+import { Plus, Timer } from 'lucide-react'
 
 const hoursRule = { required: 'Required', valueAsNumber: true, validate: (v) => (Number.isFinite(v) && v > 0 && v <= 8760) || 'A number above 0 and at most 8760' }
 
@@ -104,11 +105,11 @@ export const SlaPage = () => {
 
   return (
     <div className={styles.card}>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h2 className={styles.h2 + ' mb-0'}>Priorities and SLA targets</h2>
-        <button className={styles.btnPrimary} onClick={() => setEditing('new')}>+ New priority</button>
+        <button className={styles.btnPrimary} onClick={() => setEditing('new')}><Plus className="h-4 w-4" aria-hidden="true" />New priority</button>
       </div>
-      <DataTable columns={columns} rows={data?.items} loading={loading} error={error} emptyTitle="No priorities" />
+      <DataTable columns={columns} rows={data?.items} loading={loading} error={error} onRetry={reload} emptyTitle="No priorities" emptyIcon={Timer} />
       {editing && (
         <PolicyFormModal policy={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
           onSaved={(message) => { setEditing(null); reload(); toast.success(message) }} />

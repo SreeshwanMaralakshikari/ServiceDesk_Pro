@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { Download, LayoutDashboard } from 'lucide-react'
 import { useFetch } from '../../hooks/useFetch.js'
 import { useAuthStore } from '../../store/authStore.js'
 import { DataTable } from '../common/DataTable.jsx'
 import { styles, statusColors, priorityColors } from '../../styles/common.js'
+import { StatusBadge, PriorityBadge } from '../common/Badges.jsx'
+import { statusLabel, priorityLabel } from '../../utils/labels.js'
 import { getErrorMessage } from '../../utils/errors.js'
 import { downloadCsv } from './downloadCsv.js'
 
@@ -17,11 +20,11 @@ const BLANK = { q: '', status: '', priority: '', from: '', to: '', department: '
 const columns = [
   { key: 'publicId', header: 'ID', render: (r) => <span className="font-mono text-xs whitespace-nowrap">{r.publicId}</span> },
   { key: 'title', header: 'Title' },
-  { key: 'team', header: 'Team' },
-  { key: 'priority', header: 'Priority' },
-  { key: 'status', header: 'Status' },
-  { key: 'assignedTo', header: 'Assigned to' },
-  { key: 'createdAt', header: 'Created (IST)' },
+  { key: 'team', header: 'Team', className: 'hidden lg:table-cell' },
+  { key: 'priority', header: 'Priority', render: (r) => <PriorityBadge priority={r.priority} /> },
+  { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+  { key: 'assignedTo', header: 'Assigned to', className: 'hidden md:table-cell' },
+  { key: 'createdAt', header: 'Created (IST)', className: 'hidden md:table-cell', render: (r) => <span className="whitespace-nowrap">{r.createdAt}</span> },
   { key: 'resolutionSla', header: 'Resolution SLA' },
 ]
 
@@ -33,11 +36,14 @@ export const ReportsPage = () => {
   const [page, setPage] = useState(1)
   const [busy, setBusy] = useState(false)
   const { data: priorityData } = useFetch('/meta-api/priorities')
-  const priorityOptions = priorityData?.length ? priorityData.map((p) => p.priority) : DEFAULT_PRIORITIES
+  // the admin-set label when the server has one, otherwise a readable version of the code
+  const priorityOptions = priorityData?.length
+    ? priorityData.map((p) => ({ value: p.priority, label: p.label || priorityLabel(p.priority) }))
+    : DEFAULT_PRIORITIES.map((p) => ({ value: p, label: priorityLabel(p) }))
   const { data: teamData } = useFetch(isAdmin ? '/admin-api/departments' : null, { limit: 50, kind: 'IT_SUPPORT', isActive: true })
 
   const params = Object.fromEntries(Object.entries(applied).filter(([, v]) => v))
-  const { data, loading, error } = useFetch('/report-api/tickets', { ...params, page, limit: PAGE_SIZE })
+  const { data, loading, error, reload } = useFetch('/report-api/tickets', { ...params, page, limit: PAGE_SIZE })
 
   const apply = (e) => {
     e.preventDefault()
@@ -61,9 +67,9 @@ export const ReportsPage = () => {
 
   return (
     <div className={styles.containerWide}>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h1 className={styles.h1 + ' mb-0'}>Ticket report</h1>
-        <Link to="/manager/dashboard" className={styles.btnSecondary}>Dashboard</Link>
+        <Link to="/manager/dashboard" className={styles.btnSecondary}><LayoutDashboard className="h-4 w-4" aria-hidden="true" />Dashboard</Link>
       </div>
       <div className={styles.card}>
         <form onSubmit={apply} className="flex flex-wrap items-end gap-2 mb-4">
@@ -73,13 +79,13 @@ export const ReportsPage = () => {
           <label className="text-xs text-slate-500 flex flex-col gap-1">Status
             <select className={styles.select + ' max-w-[11rem]'} value={draft.status} onChange={set('status')}>
               <option value="">All</option>
-              {STATUSES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+              {STATUSES.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
             </select>
           </label>
           <label className="text-xs text-slate-500 flex flex-col gap-1">Priority
             <select className={styles.select + ' max-w-[9rem]'} value={draft.priority} onChange={set('priority')}>
               <option value="">All</option>
-              {priorityOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+              {priorityOptions.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
           </label>
           {isAdmin && (
@@ -99,7 +105,7 @@ export const ReportsPage = () => {
           <button className={styles.btnSecondary} type="submit">Apply</button>
           {Object.values(applied).some(Boolean) && <button type="button" className={styles.btnLink} onClick={clear}>Clear</button>}
           <button type="button" className={styles.btnPrimary + ' ml-auto'} onClick={exportCsv} disabled={busy || !data || data.total === 0}>
-            {busy ? 'Preparing…' : 'Download CSV'}
+            <Download className="h-4 w-4" aria-hidden="true" />{busy ? 'Preparing…' : 'Download CSV'}
           </button>
         </form>
         {data && (
@@ -108,7 +114,7 @@ export const ReportsPage = () => {
             {data.total > data.exportCap ? ` (limited to the newest ${data.exportCap})` : ''}. Dates are in IST.
           </p>
         )}
-        <DataTable columns={columns} rows={data?.items} loading={loading} error={error}
+        <DataTable columns={columns} rows={data?.items} loading={loading} error={error} onRetry={reload}
           page={data?.page} totalPages={data?.totalPages} total={data?.total} onPageChange={setPage}
           emptyTitle="No tickets match" emptyHint="Try widening the dates or clearing the filters." />
       </div>

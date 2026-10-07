@@ -1,5 +1,8 @@
 import { StatCard, ChartCard, SimpleTable, BarList, TrendChart, RatingBars } from '../common/charts/index.js'
-import { styles, statusColors } from '../../styles/common.js'
+import { AlertTriangle, Clock } from 'lucide-react'
+import { styles } from '../../styles/common.js'
+import { StatusBadge, PriorityBadge } from '../common/Badges.jsx'
+import { statusLabel, priorityLabel } from '../../utils/labels.js'
 
 export const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`)
 export const hrs = (v) => (v === null || v === undefined ? '—' : `${v} h`)
@@ -41,8 +44,8 @@ export const DashboardView = ({ data, showTeams = false }) => {
       <section aria-label="Right now">
         <h2 className={styles.h2}>Right now <span className="text-sm font-normal text-slate-500">(live)</span></h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Breached" icon="⚠" tone={cur.breached ? 'bad' : 'neutral'} value={cur.breached} hint="open tickets past their resolution deadline" />
-          <StatCard label="At risk" icon="◔" tone={cur.atRisk ? 'warn' : 'neutral'} value={cur.atRisk} hint="close to their deadline" />
+          <StatCard label="Breached" icon={AlertTriangle} tone={cur.breached ? 'bad' : 'neutral'} value={cur.breached} hint="open tickets past their resolution deadline" />
+          <StatCard label="At risk" icon={Clock} tone={cur.atRisk ? 'warn' : 'neutral'} value={cur.atRisk} hint="close to their deadline" />
           <StatCard label="Unassigned" value={cur.unassigned} hint="nobody has picked these up" />
           <StatCard label="Waiting for approval" value={cur.pendingApproval} hint={`${cur.awaitingConfirmation} resolved, awaiting confirmation`} />
         </div>
@@ -69,17 +72,17 @@ export const DashboardView = ({ data, showTeams = false }) => {
           ]} rows={trend} />} />
 
         <ChartCard title="Open tickets by priority" subtitle="live backlog"
-          chart={<BarList items={backlogByPriority.map((b) => ({ label: b.priority, value: b.count, hint: `${b.count} open` }))} empty="No open tickets" />}
-          table={<SimpleTable columns={[{ key: 'priority', header: 'Priority' }, { key: 'count', header: 'Open', align: 'right' }]} rows={backlogByPriority} />} />
+          chart={<BarList items={backlogByPriority.map((b) => ({ label: priorityLabel(b.priority), value: b.count, hint: `${b.count} open` }))} empty="No open tickets" />}
+          table={<SimpleTable columns={[{ key: 'priority', header: 'Priority', render: (r) => <PriorityBadge priority={r.priority} /> }, { key: 'count', header: 'Open', align: 'right' }]} rows={backlogByPriority} />} />
 
         <ChartCard title="Customer satisfaction" subtitle={`${csat.count} rating${csat.count === 1 ? '' : 's'}, average ${stars(csat.average)} (${period})`}
           chart={<RatingBars distribution={csat.distribution} />}
           table={<SimpleTable columns={[{ key: 'rating', header: 'Stars' }, { key: 'count', header: 'Ratings', align: 'right' }]} rows={csat.distribution} />} />
 
         <ChartCard title="All tickets by status" subtitle="all time, same totals as the ticket list"
-          chart={<BarList items={byStatus.map((s) => ({ label: s.status.replace('_', ' '), value: s.count, hint: `${s.count} ${s.status}` }))} />}
+          chart={<BarList items={byStatus.map((s) => ({ label: statusLabel(s.status), value: s.count, hint: `${s.count} ${statusLabel(s.status).toLowerCase()}` }))} />}
           table={<SimpleTable columns={[
-            { key: 'status', header: 'Status', render: (r) => <span className={`${styles.badge} ${statusColors[r.status] || ''}`}>{r.status}</span> },
+            { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
             { key: 'count', header: 'Tickets', align: 'right' },
           ]} rows={byStatus} />} />
 
@@ -95,7 +98,7 @@ export const DashboardView = ({ data, showTeams = false }) => {
           columns={[
             { key: 'name', header: 'Technician' },
             { key: 'open', header: 'Open', align: 'right' },
-            { key: 'breached', header: 'Breached', align: 'right', render: (r) => (r.breached ? <span className="text-red-700 font-medium">⚠ {r.breached}</span> : 0) },
+            { key: 'breached', header: 'Breached', align: 'right', render: (r) => (r.breached ? <span className="inline-flex items-center gap-1 text-red-700 font-medium"><AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />{r.breached}</span> : 0) },
             { key: 'atRisk', header: 'At risk', align: 'right' },
             { key: 'resolved', header: 'Resolved', align: 'right' },
             { key: 'resolutionCompliance', header: 'SLA met', align: 'right', render: (r) => pct(r.resolutionCompliance) },

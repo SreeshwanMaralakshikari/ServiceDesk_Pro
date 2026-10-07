@@ -4,7 +4,8 @@ import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useFetch } from '../../hooks/useFetch.js'
 import { getErrorMessage } from '../../utils/errors.js'
-import { Spinner } from '../common/Spinner.jsx'
+import { PageSkeleton } from '../common/Skeleton.jsx'
+import { ErrorState } from '../common/ErrorState.jsx'
 import { Field } from '../common/Field.jsx'
 import { styles } from '../../styles/common.js'
 
@@ -21,8 +22,8 @@ export const SettingsPage = () => {
     if (data) reset({ orgName: data.orgName, days: data.businessHours.days.map(String), start: data.businessHours.start, end: data.businessHours.end })
   }, [data, reset])
 
-  if (loading) return <Spinner />
-  if (error) return <p className="text-red-600 text-sm">{error}</p>
+  if (loading && !data) return <PageSkeleton />
+  if (error) return <div className={styles.card}><ErrorState message={error} onRetry={reload} /></div>
 
   const submit = async (values) => {
     setServerError('')

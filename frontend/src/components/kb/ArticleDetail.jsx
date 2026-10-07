@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { ArrowLeft, Eye, Pencil, ThumbsUp, Trash2 } from 'lucide-react'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useAuthStore } from '../../store/authStore.js'
-import { styles, kbStatusColors } from '../../styles/common.js'
+import { styles } from '../../styles/common.js'
+import { KbStatusBadge } from '../common/Badges.jsx'
+import { PageSkeleton } from '../common/Skeleton.jsx'
+import { NotFoundState } from '../common/NotFoundState.jsx'
+import { kbStatusLabel, transitionText } from '../../utils/labels.js'
 import { getErrorMessage } from '../../utils/errors.js'
 
 // mirrors backend/utils/kbTransitions.js — the backend stays the source of truth
@@ -113,24 +118,24 @@ export const ArticleDetail = () => {
     }
   }
 
-  if (loading) return <div className={styles.container}><p className="text-slate-500">Loading…</p></div>
-  if (!article) return <div className={styles.container}><p className="text-slate-500">Article not found.</p><Link to="/kb" className={styles.navLink}>← Back to Knowledge Base</Link></div>
+  if (loading) return <PageSkeleton />
+  if (!article) return <NotFoundState title="Article not found" hint="It may have been deleted, or you may not have access to it." backTo="/kb" backLabel="Back to Knowledge Base" />
 
   return (
     <div className={styles.container}>
-      <Link to="/kb" className={styles.navLink}>← Back to Knowledge Base</Link>
+      <Link to="/kb" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-indigo-600"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Knowledge Base</Link>
 
       <div className={styles.card + ' mt-3'}>
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="font-mono text-xs text-slate-400">{article.publicId}</p>
             <h1 className={styles.h1 + ' mb-1'}>{article.title}</h1>
             <p className="text-sm text-slate-500">
-              {article.category?.name} · by {article.author?.firstName} {article.author?.lastName} · {article.viewCount} views
+              {article.category?.name} · by {article.author?.firstName} {article.author?.lastName} · <Eye className="inline h-3.5 w-3.5 -mt-0.5" aria-hidden="true" /> {article.viewCount} views
               {article.publishedAt && ` · published ${new Date(article.publishedAt).toLocaleDateString()}`}
             </p>
           </div>
-          <span className={`${styles.badge} ${kbStatusColors[article.status] || ''}`}>{article.status}</span>
+          <KbStatusBadge status={article.status} />
         </div>
 
         <p className="mt-4 text-slate-700 italic">{article.summary}</p>
@@ -146,11 +151,11 @@ export const ArticleDetail = () => {
         {article.status === 'PUBLISHED' && (
           <div className="mt-5 flex items-center gap-3 text-sm">
             {isAuthor ? (
-              <span className="text-slate-500">👍 {article.helpfulCount ?? 0} found this helpful</span>
+              <span className="inline-flex items-center gap-1.5 text-slate-500"><ThumbsUp className="h-4 w-4" aria-hidden="true" />{article.helpfulCount ?? 0} found this helpful</span>
             ) : (
               <>
                 <button className={article.markedHelpful ? styles.btnPrimary : styles.btnSecondary} disabled={voting} onClick={toggleHelpful}>
-                  {article.markedHelpful ? '👍 Marked helpful' : '👍 This helped'}
+                  <ThumbsUp className="h-4 w-4" aria-hidden="true" />{article.markedHelpful ? 'Marked helpful' : 'This helped'}
                 </button>
                 <span className="text-slate-500">{article.helpfulCount ?? 0} found this helpful</span>
               </>
@@ -175,10 +180,10 @@ export const ArticleDetail = () => {
               <button key={a} className={a === 'publish' ? styles.btnPrimary : styles.btnSecondary} onClick={() => runAction(a)}>{ACTION_LABELS[a]}</button>
             ))}
             {canEdit && (
-              <Link to={`/kb/${article.publicId}/edit`} className={styles.btnSecondary}>Edit</Link>
+              <Link to={`/kb/${article.publicId}/edit`} className={styles.btnSecondary}><Pencil className="h-4 w-4" aria-hidden="true" />Edit</Link>
             )}
             {canDelete && (
-              <button className={styles.btnDanger} onClick={handleDelete}>Delete</button>
+              <button className={styles.btnDanger} onClick={handleDelete}><Trash2 className="h-4 w-4" aria-hidden="true" />Delete</button>
             )}
           </div>
 
@@ -189,7 +194,7 @@ export const ArticleDetail = () => {
                 {history.map((h, i) => (
                   <li key={i}>
                     <span className="text-slate-400">{new Date(h.at).toLocaleString()}</span>{' '}
-                    {h.fromStatus ? `${h.fromStatus} → ${h.toStatus}` : h.toStatus}
+                    {transitionText(h.fromStatus, h.toStatus, kbStatusLabel)}
                     {h.by && ` · ${h.by.firstName} ${h.by.lastName}`}
                     {h.note && ` — ${h.note}`}
                   </li>

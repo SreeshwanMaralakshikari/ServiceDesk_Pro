@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { Laptop } from 'lucide-react'
 import { axiosInstance } from '../../axiosInstance.js'
-import { styles, assetStatusColors } from '../../styles/common.js'
+import { styles } from '../../styles/common.js'
+import { AssetStatusBadge } from '../common/Badges.jsx'
 import { getErrorMessage } from '../../utils/errors.js'
 
 const FINISHED_STATUSES = ['CLOSED', 'CANCELLED', 'REJECTED']
@@ -47,22 +49,22 @@ export const RelatedAssetPanel = ({ ticket, user, onChanged }) => {
   if (!asset && !canEdit) return null
 
   return (
-    <div className="mb-6 border-t border-slate-100 pt-4" data-testid="related-asset">
-      <h2 className={styles.h2}>Related asset</h2>
+    <section className={styles.card} data-testid="related-asset" aria-label="Related asset">
+      <h2 className={styles.h2 + ' flex items-center gap-2'}><Laptop className="h-4 w-4 text-slate-400" aria-hidden="true" />Related asset</h2>
       {asset ? (
         <p className="text-sm text-slate-700 mb-2 flex flex-wrap items-center gap-2">
           {ASSET_PAGE_ROLES.includes(user.role)
             ? <Link to={`/assets/${asset.publicId}`} className="font-mono text-indigo-700 hover:underline">{asset.publicId}</Link>
             : <span className="font-mono">{asset.publicId}</span>}
           <span>{asset.name}{asset.assetClass ? ` (${asset.assetClass})` : ''}</span>
-          {asset.status && <span className={`${styles.badge} ${assetStatusColors[asset.status] || ''}`}>{asset.status}</span>}
+          {asset.status && <AssetStatusBadge status={asset.status} />}
           {canEdit && <button type="button" className={styles.btnLink} disabled={saving} onClick={() => save(null)}>Remove link</button>}
         </p>
       ) : (
         <p className="text-sm text-slate-400 mb-2">No asset linked.</p>
       )}
       {canEdit && (
-        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!pick.trim()) return toast.error(pickFromOwn ? 'Pick one of your assets first' : 'Enter an asset ID first'); save(pick.trim()) }}>
+        <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (!pick.trim()) return toast.error(pickFromOwn ? 'Pick one of your assets first' : 'Enter an asset ID first'); save(pick.trim()) }}>
           {pickFromOwn ? (
             <select className={styles.select} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Your assets">
               <option value="">{myAssets === null ? 'Loading your assets…' : myAssets.length ? 'Pick one of your assets…' : 'You have no assets assigned'}</option>
@@ -74,6 +76,6 @@ export const RelatedAssetPanel = ({ ticket, user, onChanged }) => {
           <button className={styles.btnSecondary} disabled={saving} type="submit">{asset ? 'Change' : 'Link'}</button>
         </form>
       )}
-    </div>
+    </section>
   )
 }

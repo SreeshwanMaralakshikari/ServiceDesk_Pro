@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import toast from 'react-hot-toast'
+import { Timer } from 'lucide-react'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useFetch } from '../../hooks/useFetch.js'
 import { styles } from '../../styles/common.js'
@@ -39,9 +40,9 @@ export const WorkLogPanel = ({ ticket, canAdd, onChanged }) => {
   }
 
   return (
-    <div className="mb-6 border-t border-slate-100 pt-4">
+    <section className={styles.card} aria-label="Work log">
       <div className="flex items-baseline justify-between">
-        <h2 className={styles.h2}>Work log</h2>
+        <h2 className={styles.h2 + ' flex items-center gap-2'}><Timer className="h-4 w-4 text-emerald-500" aria-hidden="true" />Work log</h2>
         <span className="text-sm text-slate-500">Total: {formatMinutes(data?.totalMinutes ?? 0)}</span>
       </div>
       {data?.items?.length === 0 && <p className="text-sm text-slate-400 mb-2">No work logged yet.</p>}
@@ -60,6 +61,6 @@ export const WorkLogPanel = ({ ticket, canAdd, onChanged }) => {
           <button className={styles.btnSecondary} disabled={saving} type="submit">Add</button>
         </form>
       )}
-    </div>
+    </section>
   )
 }

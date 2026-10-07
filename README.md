@@ -106,7 +106,7 @@ Employees belong to a business department (HR, Engineering, Finance). Technician
 
 | Layer | Choice | Details |
 |---|---|---|
-| Frontend | React 19, Vite 6, Tailwind CSS 4, React Router 7, Zustand 5, axios, React Hook Form, react-hot-toast | [Frontend README](frontend/README.md) |
+| Frontend | React 19, Vite 6, Tailwind CSS 4, React Router 7, Zustand 5, axios, React Hook Form, react-hot-toast, lucide-react icons | [Frontend README](frontend/README.md) |
 | Backend | Node.js (ES modules), Express 5, Mongoose 9, node-cron 3, bcryptjs, jsonwebtoken, helmet, express-rate-limit | [Backend README](backend/README.md) |
 | Database | MongoDB Atlas (a replica set, so transactions work) | [Database document](docs/Database_Schema_Document.md) |
 | AI | Groq's OpenAI-compatible chat endpoint through `fetch` (no SDK), model from `AI_MODEL` | [Backend README](backend/README.md#environment-variables) |

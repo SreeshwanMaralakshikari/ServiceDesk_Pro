@@ -11,6 +11,7 @@ import { Modal, ModalFooter } from '../common/Modal.jsx'
 import { Field } from '../common/Field.jsx'
 import { ActiveBadge } from '../common/FlagBadge.jsx'
 import { styles } from '../../styles/common.js'
+import { Building2, Plus } from 'lucide-react'
 
 const KIND_LABEL = { BUSINESS: 'Business', IT_SUPPORT: 'IT support' }
 
@@ -87,9 +88,9 @@ export const DepartmentsPage = () => {
     { key: 'name', header: 'Name', render: (d) => <span className="font-medium">{d.name}</span> },
     { key: 'code', header: 'Code', render: (d) => <span className="font-mono text-xs">{d.code}</span> },
     { key: 'kind', header: 'Kind', render: (d) => KIND_LABEL[d.kind] },
-    { key: 'manager', header: 'Manager', render: (d) => (d.manager ? `${d.manager.firstName} ${d.manager.lastName}` : <span className="text-slate-300">—</span>) },
+    { key: 'manager', header: 'Manager', className: 'hidden md:table-cell', render: (d) => (d.manager ? `${d.manager.firstName} ${d.manager.lastName}` : <span className="text-slate-300">—</span>) },
     { key: 'activeUsers', header: 'Users' },
-    { key: 'activeCategories', header: 'Categories', render: (d) => (d.kind === 'IT_SUPPORT' ? d.activeCategories : <span className="text-slate-300">—</span>) },
+    { key: 'activeCategories', header: 'Categories', className: 'hidden sm:table-cell', render: (d) => (d.kind === 'IT_SUPPORT' ? d.activeCategories : <span className="text-slate-300">—</span>) },
     { key: 'isActive', header: 'Status', render: (d) => <ActiveBadge isActive={d.isActive} /> },
     { key: 'actions', header: '', render: (d) => (
       <div className="flex gap-3 justify-end whitespace-nowrap">
@@ -101,9 +102,9 @@ export const DepartmentsPage = () => {
 
   return (
     <div className={styles.card}>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h2 className={styles.h2 + ' mb-0'}>Departments and support teams</h2>
-        <button className={styles.btnPrimary} onClick={() => setEditing('new')}>+ New department</button>
+        <button className={styles.btnPrimary} onClick={() => setEditing('new')}><Plus className="h-4 w-4" aria-hidden="true" />New department</button>
       </div>
       <div className="mb-4">
         <select className={styles.select + ' max-w-[12rem]'} value={kind} onChange={(e) => { setPage(1); setKind(e.target.value) }} aria-label="Filter by kind">
@@ -112,8 +113,8 @@ export const DepartmentsPage = () => {
           <option value="IT_SUPPORT">IT support</option>
         </select>
       </div>
-      <DataTable columns={columns} rows={data?.items} loading={loading} error={error}
-        page={data?.page} totalPages={data?.totalPages} total={data?.total} onPageChange={setPage} emptyTitle="No departments" />
+      <DataTable columns={columns} rows={data?.items} loading={loading} error={error} onRetry={reload}
+        page={data?.page} totalPages={data?.totalPages} total={data?.total} onPageChange={setPage} emptyTitle="No departments" emptyIcon={Building2} />
       {editing && (
         <DepartmentFormModal department={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
           onSaved={(message) => { setEditing(null); reload(); toast.success(message) }} />

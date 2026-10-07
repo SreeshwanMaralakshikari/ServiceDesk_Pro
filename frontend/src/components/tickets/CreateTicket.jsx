@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { Sparkles } from 'lucide-react'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useAuthStore } from '../../store/authStore.js'
 import { styles } from '../../styles/common.js'
+import { humanize } from '../../utils/labels.js'
 import { getErrorMessage } from '../../utils/errors.js'
 
 export const CreateTicket = () => {
@@ -59,10 +61,11 @@ export const CreateTicket = () => {
   return (
     <div className={styles.container}>
       <div className={`${styles.card} max-w-lg mx-auto`}>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <h1 className={styles.h1 + ' mb-0'}>Create ticket</h1>
           <button type="button" className={styles.btnSecondary} onClick={suggest} disabled={suggesting}>
-            {suggesting ? 'Thinking…' : '✨ Suggest category & priority'}
+            <Sparkles className="h-4 w-4 text-indigo-500" aria-hidden="true" />
+            {suggesting ? 'Thinking…' : 'Suggest category & priority'}
           </button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -78,7 +81,7 @@ export const CreateTicket = () => {
             <label className={styles.label}>Category</label>
             <select className={styles.select} required value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
               <option value="">Select…</option>
-              {categories.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.ticketType})</option>)}
+              {categories.map((c) => <option key={c._id} value={c._id}>{c.name} ({humanize(c.ticketType)})</option>)}
             </select>
           </div>
           <div>

@@ -12,7 +12,10 @@ import { Modal, ModalFooter } from '../common/Modal.jsx'
 import { Field } from '../common/Field.jsx'
 import { TagInput } from '../common/TagInput.jsx'
 import { ActiveBadge } from '../common/FlagBadge.jsx'
-import { styles, roleColors } from '../../styles/common.js'
+import { styles } from '../../styles/common.js'
+import { RoleBadge } from '../common/Badges.jsx'
+import { roleLabel } from '../../utils/labels.js'
+import { Plus, Search, Users } from 'lucide-react'
 
 const ROLES = ['ADMIN', 'MANAGER', 'TECHNICIAN', 'EMPLOYEE', 'ASSET_MANAGER']
 // which kind of department each role belongs to (no entry = no department)
@@ -79,7 +82,7 @@ const UserFormModal = ({ user, departments, isSelf, onClose, onSaved }) => {
         )}
         <Field label="Role" hint={isSelf ? 'You cannot change your own role.' : undefined}>
           <select className={styles.select} disabled={isSelf} {...register('role')}>
-            {ROLES.map((r) => <option key={r} value={r}>{r.replace('_', ' ')}</option>)}
+            {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
           </select>
         </Field>
         {kind ? (
@@ -126,12 +129,12 @@ export const UsersPage = () => {
 
   const columns = [
     { key: 'name', header: 'Name', render: (u) => <div><p className="font-medium">{u.firstName} {u.lastName}</p><p className="text-xs text-slate-400">{u.email}</p></div> },
-    { key: 'role', header: 'Role', render: (u) => <span className={`${styles.badge} ${roleColors[u.role]}`}>{u.role.replace('_', ' ')}</span> },
-    { key: 'department', header: 'Team', render: (u) => u.department?.name ?? <span className="text-slate-300">—</span> },
-    { key: 'skills', header: 'Skills', render: (u) => (u.role === 'TECHNICIAN'
+    { key: 'role', header: 'Role', render: (u) => <RoleBadge role={u.role} /> },
+    { key: 'department', header: 'Team', className: 'hidden md:table-cell', render: (u) => u.department?.name ?? <span className="text-slate-300">—</span> },
+    { key: 'skills', header: 'Skills', className: 'hidden lg:table-cell', render: (u) => (u.role === 'TECHNICIAN'
       ? <div className="flex flex-wrap gap-1">{u.skills?.length ? u.skills.map((s) => <span key={s} className={styles.chip}>{s}</span>) : <span className="text-slate-300">none</span>}</div>
       : null) },
-    { key: 'load', header: 'Open', render: (u) => (u.role === 'TECHNICIAN' ? u.openTickets : null) },
+    { key: 'load', header: 'Open', className: 'hidden sm:table-cell', render: (u) => (u.role === 'TECHNICIAN' ? u.openTickets : null) },
     { key: 'isActive', header: 'Status', render: (u) => <ActiveBadge isActive={u.isActive} /> },
     { key: 'actions', header: '', render: (u) => (
       <div className="flex gap-3 justify-end whitespace-nowrap">
@@ -143,15 +146,18 @@ export const UsersPage = () => {
 
   return (
     <div className={styles.card}>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h2 className={styles.h2 + ' mb-0'}>Users</h2>
-        <button className={styles.btnPrimary} onClick={() => setEditing('new')}>+ New user</button>
+        <button className={styles.btnPrimary} onClick={() => setEditing('new')}><Plus className="h-4 w-4" aria-hidden="true" />New user</button>
       </div>
       <form onSubmit={applySearch} className="flex flex-wrap items-center gap-2 mb-4">
-        <input className={styles.input + ' max-w-xs'} placeholder="Search name or email…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="relative w-full sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" aria-hidden="true" />
+          <input className={styles.input + ' pl-9'} placeholder="Search name or email…" aria-label="Search users" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
         <select className={styles.select + ' max-w-[11rem]'} value={filters.role} onChange={(e) => setFilter('role', e.target.value)} aria-label="Filter by role">
           <option value="">All roles</option>
-          {ROLES.map((r) => <option key={r} value={r}>{r.replace('_', ' ')}</option>)}
+          {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
         </select>
         <select className={styles.select + ' max-w-[12rem]'} value={filters.department} onChange={(e) => setFilter('department', e.target.value)} aria-label="Filter by team">
           <option value="">All teams</option>
@@ -164,9 +170,9 @@ export const UsersPage = () => {
         </select>
         <button className={styles.btnSecondary} type="submit">Search</button>
       </form>
-      <DataTable columns={columns} rows={data?.items} loading={loading} error={error}
+      <DataTable columns={columns} rows={data?.items} loading={loading} error={error} onRetry={reload}
         page={data?.page} totalPages={data?.totalPages} total={data?.total} onPageChange={setPage}
-        emptyTitle="No users found" emptyHint="Try clearing the filters." />
+        emptyTitle="No users found" emptyHint="Try clearing the filters." emptyIcon={Users} />
 
       {editing && (
         <UserFormModal user={editing === 'new' ? null : editing} departments={departments} isSelf={editing !== 'new' && editing._id === me?._id}

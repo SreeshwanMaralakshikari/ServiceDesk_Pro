@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { FileBarChart, RefreshCw } from 'lucide-react'
 import { useFetch } from '../../hooks/useFetch.js'
 import { useAuthStore } from '../../store/authStore.js'
-import { Spinner } from '../common/Spinner.jsx'
+import { StatSkeleton } from '../common/Skeleton.jsx'
+import { ErrorState } from '../common/ErrorState.jsx'
 import { styles } from '../../styles/common.js'
 import { DashboardView, DAY_OPTIONS } from './DashboardView.jsx'
 
@@ -28,12 +30,12 @@ export const ManagerDashboard = () => {
           <select className={styles.select + ' max-w-[10rem]'} value={days} onChange={(e) => setDays(e.target.value)} aria-label="Period">
             {DAY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-          <button className={styles.btnSecondary} onClick={reload}>Refresh</button>
-          <Link to="/reports" className={styles.btnSecondary}>Reports</Link>
+          <button className={styles.btnSecondary} onClick={reload}><RefreshCw className="h-4 w-4" aria-hidden="true" />Refresh</button>
+          <Link to="/reports" className={styles.btnSecondary}><FileBarChart className="h-4 w-4" aria-hidden="true" />Reports</Link>
         </div>
       </div>
-      {loading && !data && <Spinner />}
-      {error && <p className="text-red-600 text-sm">{error}</p>}
+      {loading && !data && <StatSkeleton />}
+      {error && <div className={styles.card}><ErrorState message={error} onRetry={reload} /></div>}
       {data && <DashboardView data={data} showTeams={isAdmin && !department} />}
     </div>
   )

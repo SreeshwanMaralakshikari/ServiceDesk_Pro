@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { Bell, CheckCheck } from 'lucide-react'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useFetch } from '../../hooks/useFetch.js'
 import { DataTable } from '../common/DataTable.jsx'
@@ -36,12 +37,12 @@ export const NotificationsPage = () => {
     <div className={styles.container}>
       <div className="flex items-center justify-between mb-4">
         <h1 className={styles.h1 + ' mb-0'}>Notifications</h1>
-        <button className={styles.btnSecondary} onClick={markAll}>Mark all read</button>
+        <button className={styles.btnSecondary} onClick={markAll}><CheckCheck className="h-4 w-4" aria-hidden="true" />Mark all read</button>
       </div>
       <div className={styles.card}>
         <DataTable columns={columns} rows={data?.items} loading={loading} error={error} onRowClick={open}
           page={data?.page} totalPages={data?.totalPages} total={data?.total} onPageChange={setPage}
-          emptyTitle="No notifications yet" emptyHint="Updates on your tickets and assets show up here." />
+          emptyTitle="No notifications yet" emptyHint="Updates on your tickets and assets show up here." emptyIcon={Bell} onRetry={reload} />
       </div>
     </div>
   )

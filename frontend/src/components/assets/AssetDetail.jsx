@@ -1,10 +1,15 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft, Pencil } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import toast from 'react-hot-toast'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useAuthStore } from '../../store/authStore.js'
-import { styles, assetStatusColors } from '../../styles/common.js'
+import { styles } from '../../styles/common.js'
+import { AssetStatusBadge } from '../common/Badges.jsx'
+import { PageSkeleton } from '../common/Skeleton.jsx'
+import { NotFoundState } from '../common/NotFoundState.jsx'
+import { assetStatusLabel, assetTypeLabel, roleLabel, transitionText } from '../../utils/labels.js'
 import { getErrorMessage } from '../../utils/errors.js'
 import { Modal, ModalFooter } from '../common/Modal.jsx'
 import { Field } from '../common/Field.jsx'
@@ -176,8 +181,8 @@ export const AssetDetail = () => {
     }
   }
 
-  if (loading) return <div className={styles.container}>Loading…</div>
-  if (!asset) return <div className={styles.container}>Asset not found.</div>
+  if (loading) return <PageSkeleton />
+  if (!asset) return <NotFoundState title="Asset not found" hint="It may not exist, or you may not have access to it." backTo="/assets" backLabel="Back to assets" />
 
   const actions = actionsFor(asset, user)
   const isStaff = user.role === 'ASSET_MANAGER' || user.role === 'ADMIN' || user.role === 'TECHNICIAN'
@@ -185,19 +190,20 @@ export const AssetDetail = () => {
 
   return (
     <div className={styles.container}>
+      <Link to="/assets" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Assets</Link>
       <div className={styles.card}>
-        <div className="flex items-start justify-between mb-2">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
           <div>
             <p className="font-mono text-xs text-slate-400">{asset.publicId}</p>
             <h1 className={styles.h1 + ' mb-1'}>{asset.name}</h1>
           </div>
           <div className="flex items-center gap-2">
-            {canEdit && <button type="button" className={styles.btnSecondary} onClick={() => setEditing(true)}>Edit details</button>}
-            <span className={`${styles.badge} ${assetStatusColors[asset.status] || ''}`}>{asset.status}</span>
+            {canEdit && <button type="button" className={styles.btnSecondary} onClick={() => setEditing(true)}><Pencil className="h-4 w-4" aria-hidden="true" />Edit details</button>}
+            <AssetStatusBadge status={asset.status} />
           </div>
         </div>
         <p className="text-sm text-slate-500 mb-4">
-          {asset.type} · {asset.assetClass}
+          {assetTypeLabel(asset.type)} · {asset.assetClass}
           {asset.serialNumber && ` · S/N ${asset.serialNumber}`}
           {asset.licenseKey && ` · Key ${asset.licenseKey}`}
           {asset.vendor && ` · ${asset.vendor.name}`}
@@ -217,18 +223,18 @@ export const AssetDetail = () => {
         {actions.length > 0 && (
           <div className="flex flex-col gap-3 mb-6 border-t border-slate-100 pt-4">
             {actions.includes('assign') && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap sm:flex-nowrap gap-2">
                 <select className={styles.select} value={userPick} onChange={(e) => setUserPick(e.target.value)}>
                   <option value="">Select user…</option>
-                  {users.map((u) => <option key={u._id} value={u._id}>{u.firstName} {u.lastName} ({u.role})</option>)}
+                  {users.map((u) => <option key={u._id} value={u._id}>{u.firstName} {u.lastName} ({roleLabel(u.role)})</option>)}
                 </select>
                 <button className={styles.btnPrimary} onClick={() => { if (!userPick) return toast.error('Pick a user first'); runAction('assign', { assignedTo: userPick }) }}>Assign</button>
               </div>
             )}
             {actions.includes('replace') && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap sm:flex-nowrap gap-2">
                 <select className={styles.select} value={replacementPick} onChange={(e) => setReplacementPick(e.target.value)}>
-                  <option value="">Select replacement (IN_STOCK)…</option>
+                  <option value="">Select a replacement (in stock)…</option>
                   {inStockAssets.map((a) => <option key={a._id} value={a._id}>{a.publicId} — {a.name}</option>)}
                 </select>
                 <button className={styles.btnSecondary} onClick={runReplace}>Replace</button>
@@ -258,7 +264,7 @@ export const AssetDetail = () => {
               ))}
               {(!asset.maintenance || asset.maintenance.length === 0) && <p className="text-slate-400 text-sm">No maintenance entries yet.</p>}
             </ul>
-            <form onSubmit={addMaintenance} className="flex gap-2 mb-6">
+            <form onSubmit={addMaintenance} className="flex flex-wrap sm:flex-nowrap gap-2 mb-6">
               <input className={styles.input} placeholder="Type (e.g. Repair)" value={maintForm.type} onChange={(e) => setMaintForm({ ...maintForm, type: e.target.value })} />
               <input className={styles.input + ' max-w-[7rem]'} placeholder="Cost" type="number" value={maintForm.cost} onChange={(e) => setMaintForm({ ...maintForm, cost: e.target.value })} />
               <input className={styles.input} placeholder="Note" value={maintForm.note} onChange={(e) => setMaintForm({ ...maintForm, note: e.target.value })} />
@@ -273,7 +279,7 @@ export const AssetDetail = () => {
         <ul className="space-y-1">
           {asset.lifecycleHistory?.slice().reverse().map((h, i) => (
             <li key={i} className="text-sm text-slate-600">
-              {h.fromStatus ? `${h.fromStatus} → ${h.toStatus}` : h.toStatus}
+              {transitionText(h.fromStatus, h.toStatus, assetStatusLabel)}
               {h.note ? ` — ${h.note}` : ''}
               <span className="text-slate-400 text-xs"> ({new Date(h.at).toLocaleString()})</span>
             </li>

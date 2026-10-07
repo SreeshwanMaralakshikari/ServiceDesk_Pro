@@ -1,11 +1,21 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import {
+  ArrowLeft, BookOpen, CalendarDays, CheckCircle2, Clock, FileText, Flag, Folder, Lock, MessageSquare,
+  PauseCircle, RefreshCw, RotateCcw, Send, Sparkles, UserCheck, UserRound, XCircle,
+} from 'lucide-react'
 import { axiosInstance } from '../../axiosInstance.js'
 import { useAuthStore } from '../../store/authStore.js'
-import { styles, statusColors, priorityColors } from '../../styles/common.js'
+import { styles } from '../../styles/common.js'
 import { getSlaStatus, formatSlaCountdown } from '../../utils/sla.js'
 import { getErrorMessage } from '../../utils/errors.js'
+import { humanize } from '../../utils/labels.js'
+import { StatusBadge, PriorityBadge } from '../common/Badges.jsx'
+import { Modal } from '../common/Modal.jsx'
+import { PageSkeleton } from '../common/Skeleton.jsx'
+import { NotFoundState } from '../common/NotFoundState.jsx'
+import { Avatar } from '../layout/UserMenu.jsx'
 import { CsatPanel } from './CsatPanel.jsx'
 import { WorkLogPanel } from './WorkLogPanel.jsx'
 import { AuditPanel } from './AuditPanel.jsx'
@@ -54,6 +64,38 @@ const ACTION_LABELS = {
   resume: 'Resume', resolve: 'Resolve', confirm: 'Confirm & close', reopen: 'Reopen',
 }
 
+const ACTION_ICONS = {
+  approve: CheckCircle2, reject: XCircle, cancel: XCircle, assign: UserCheck, reassign: UserCheck,
+  claim: UserCheck, start: Send, hold: PauseCircle, resume: RotateCcw, resolve: CheckCircle2,
+  confirm: CheckCircle2, reopen: RotateCcw,
+}
+
+// the one button that is the obvious next step gets the primary style
+const PRIMARY_ORDER = ['approve', 'claim', 'start', 'resolve', 'confirm', 'resume', 'assign', 'reassign']
+const DANGER_ACTIONS = ['reject', 'cancel']
+
+// what the dialog for each action asks for
+const DIALOG_TEXT = {
+  resolve: { title: 'Resolve ticket', label: 'Resolution summary', hint: 'The requester reads this before confirming the fix.', placeholder: 'What was wrong and what fixed it…' },
+  reject: { title: 'Reject request', label: 'Reason', hint: 'The requester sees this reason.', placeholder: 'Why this request is rejected…' },
+  cancel: { title: 'Cancel ticket', label: 'Reason', hint: 'Cancelled tickets cannot be reopened.', placeholder: 'Why this ticket is no longer needed…' },
+  hold: { title: 'Put on hold', label: 'Reason', hint: 'The SLA clock pauses while the ticket is on hold.', placeholder: 'What are you waiting for…' },
+  reopen: { title: 'Reopen ticket', label: 'Reason', hint: 'Tell the team what is still not working.', placeholder: 'What is still wrong…' },
+}
+
+const fullName = (person) => [person?.firstName, person?.lastName].filter(Boolean).join(' ')
+
+// one label/value row in the details card
+const DetailRow = ({ icon: Icon, label, children }) => (
+  <div className="flex gap-3 py-2.5">
+    <Icon className="h-4 w-4 shrink-0 text-slate-400 mt-0.5" aria-hidden="true" />
+    <div className="min-w-0 flex-1">
+      <p className="text-xs text-slate-500">{label}</p>
+      <div className="text-sm text-slate-800 mt-0.5">{children}</div>
+    </div>
+  </div>
+)
+
 export const TicketDetail = () => {
   const { ticketId } = useParams()
   const user = useAuthStore((s) => s.user)
@@ -73,6 +115,8 @@ export const TicketDetail = () => {
   const [reloadKey, setReloadKey] = useState(0) // bumps on every reload so the timeline refetches
   const [suggested, setSuggested] = useState([]) // ranked technicians for the assign form
   const [kbSuggestions, setKbSuggestions] = useState(null) // { matchedBy, articles } | null while loading or unavailable
+  const [dialog, setDialog] = useState(null) // the action whose dialog is open, or null
+  const [busy, setBusy] = useState(false) // an action request is in flight
 
   const load = useCallback(() => {
     axiosInstance.get(`/ticket-api/tickets/${ticketId}`)
@@ -152,21 +196,54 @@ export const TicketDetail = () => {
     }
   }
 
+  // 'ok' | 'conflict' (the ticket changed underneath us and was reloaded) | 'error'
   const runAction = async (action, body = {}) => {
+    setBusy(true)
     try {
       await axiosInstance.patch(`/ticket-api/tickets/${ticketId}/${action}`, { ...body, version: ticket.version })
       toast.success(`Ticket ${action} succeeded`)
       setNoteDrafts((d) => ({ ...d, [action]: '' }))
       setTechnicianPick('')
       load()
+      return 'ok'
     } catch (err) {
       if (err.response?.status === 409) {
         toast.error('This ticket changed. Reloading…')
         load()
-      } else {
-        toast.error(getErrorMessage(err, `Failed to ${action}`))
+        return 'conflict'
       }
+      toast.error(getErrorMessage(err, `Failed to ${action}`))
+      return 'error'
+    } finally {
+      setBusy(false)
     }
+  }
+
+  // a button press: actions that need input open their dialog, the rest run at once
+  const startAction = (action) => {
+    if (action === 'resolve' || NOTE_REQUIRED_ACTIONS.includes(action) || ASSIGN_ACTIONS.includes(action)) setDialog(action)
+    else runAction(action)
+  }
+
+  // the dialog's submit: same checks the old inline forms made
+  const submitDialog = async (e) => {
+    e.preventDefault()
+    const action = dialog
+    let outcome
+    if (action === 'resolve') {
+      if (!resolutionSummary.trim()) return toast.error('A resolution summary is required')
+      outcome = await runAction('resolve', { resolutionSummary })
+      if (outcome === 'ok') setResolutionSummary('')
+    } else if (ASSIGN_ACTIONS.includes(action)) {
+      if (!technicianPick) return toast.error('Pick a technician first')
+      outcome = await runAction(action, { technicianId: technicianPick })
+    } else {
+      const value = noteDrafts[action]
+      if (!value?.trim()) return toast.error('A note is required')
+      outcome = await runAction(action, { note: value })
+    }
+    // on a conflict the ticket was reloaded and this action may no longer apply, so close too
+    if (outcome !== 'error') setDialog(null)
   }
 
   const addComment = async (e) => {
@@ -181,11 +258,11 @@ export const TicketDetail = () => {
     }
   }
 
-  if (loading) return <div className={styles.container}>Loading…</div>
-  if (!ticket) return <div className={styles.container}>Ticket not found.</div>
+  if (loading) return <PageSkeleton wide />
+  if (!ticket) return <NotFoundState title="Ticket not found" hint="It may not exist, or you may not have access to it." backTo="/tickets" backLabel="Back to tickets" />
 
   const actions = actionsFor(ticket, user)
-  const simpleActions = actions.filter((a) => a !== 'resolve' && !NOTE_REQUIRED_ACTIONS.includes(a) && !ASSIGN_ACTIONS.includes(a))
+  const primaryAction = PRIMARY_ORDER.find((a) => actions.includes(a))
   const sla = getSlaStatus(ticket)
   const isRequester = Boolean(ticket.requester) && user._id === ticket.requester._id
   const isAssignee = Boolean(ticket.assignedTo) && user._id === ticket.assignedTo._id
@@ -194,173 +271,228 @@ export const TicketDetail = () => {
   const canReplyPublic = isRequester || isAssignee || user.role === 'MANAGER' || user.role === 'ADMIN'
   const internalOnly = isStaff && !canReplyPublic
   const canChangePriority = (user.role === 'MANAGER' || user.role === 'ADMIN') && !['RESOLVED', 'CLOSED', 'CANCELLED', 'REJECTED'].includes(ticket.status)
+  // the asset manager has no ticket list, so the back link would only bounce them
+  const backTo = user.role === 'ASSET_MANAGER' ? '/' : '/tickets'
+
+  const buttonClass = (action) => (action === primaryAction ? styles.btnPrimary : DANGER_ACTIONS.includes(action) ? styles.btnDangerSoft : styles.btnSecondary)
+  const dialogText = dialog ? DIALOG_TEXT[dialog] : null
 
   return (
-    <div className={styles.container}>
-      <div className={styles.card}>
-        <div className="flex items-start justify-between mb-2">
-          <div>
-            <p className="font-mono text-xs text-slate-400">{ticket.publicId}</p>
-            <h1 className={styles.h1 + ' mb-1'}>{ticket.title}</h1>
-          </div>
-          <div className="flex flex-col items-end gap-1">
-            <div className="flex gap-2">
-              <span className={`${styles.badge} ${priorityColors[ticket.priority] || ''}`}>{ticket.priority}</span>
-              <span className={`${styles.badge} ${statusColors[ticket.status] || ''}`}>{ticket.status}</span>
-              {sla && <span className={`${styles.badge} ${sla.className}`}>{sla.label}</span>}
-            </div>
-            {sla && sla.label !== 'On hold' && ticket.sla?.resolutionDueAt && (
-              <p className="text-xs text-slate-400">{formatSlaCountdown(ticket.sla.resolutionDueAt)} to resolve</p>
-            )}
-          </div>
+    <div className={styles.containerWide}>
+      <Link to={backTo} className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-indigo-600 mb-3">
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />{backTo === '/' ? 'Home' : 'Tickets'}
+      </Link>
+
+      {/* header: what this is, where it stands, what can be done next */}
+      <div className={styles.card + ' mb-6'}>
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <span className="font-mono text-xs text-slate-500">{ticket.publicId}</span>
+          <StatusBadge status={ticket.status} />
+          <PriorityBadge priority={ticket.priority} />
+          {sla && <span className={`${styles.badge} whitespace-nowrap ${sla.className}`}>{sla.label}</span>}
         </div>
-        <p className="text-slate-700 mb-4 whitespace-pre-wrap">{ticket.description}</p>
-        <p className="text-sm text-slate-500 mb-2">
-          Requested by {ticket.requester?.firstName} {ticket.requester?.lastName} ·
-          {' '}Category: {ticket.category?.name} ·
-          {' '}Assigned to: {ticket.assignedTo ? `${ticket.assignedTo.firstName} ${ticket.assignedTo.lastName}${ASSIGN_METHOD[ticket.assignmentMethod] ? ` (${ASSIGN_METHOD[ticket.assignmentMethod]})` : ''}` : 'unassigned'}
+        <h1 className="text-2xl font-semibold text-slate-900 break-words">{ticket.title}</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Raised by {fullName(ticket.requester) || 'someone'}
+          {ticket.createdAt && <> on {new Date(ticket.createdAt).toLocaleString()}</>}
+          {ticket.category?.name && <> · {ticket.category.name}</>}
         </p>
-        {canChangePriority && (
-          <div className="flex items-center gap-2 mb-2">
-            <select className={styles.select + ' max-w-[10rem]'} value={priorityPick} onChange={(e) => setPriorityPick(e.target.value)}>
-              <option value="">Change priority…</option>
-              {priorities.filter((p) => p.priority !== ticket.priority).map((p) => <option key={p._id} value={p.priority}>{p.label}</option>)}
-            </select>
-            {priorityPick && <button className={styles.btnSecondary} onClick={changePriority}>Apply</button>}
-          </div>
-        )}
+
+        {/* status notes */}
         {ticket.status === 'REJECTED' && ticket.approval?.rejectionReason && (
-          <p className="text-sm text-red-600 mb-2">Rejected: {ticket.approval.rejectionReason}</p>
+          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">Rejected: {ticket.approval.rejectionReason}</p>
         )}
         {ticket.status === 'CANCELLED' && ticket.cancellation?.reason && (
-          <p className="text-sm text-slate-500 mb-2">Cancelled: {ticket.cancellation.reason}</p>
+          <p className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">Cancelled: {ticket.cancellation.reason}</p>
         )}
-        {ticket.status === 'ON_HOLD' && <p className="text-sm text-amber-600 mb-2">On hold — SLA clock paused</p>}
-        {ticket.status === 'CLOSED' && ticket.closedAt && <p className="text-xs text-slate-400 mb-2">Closed {new Date(ticket.closedAt).toLocaleString()}{ticket.closeReason ? ` (${ticket.closeReason.toLowerCase().replace('_', ' ')})` : ''}</p>}
-        {ticket.reopenCount > 0 && <p className="text-xs text-orange-500 mb-4">Reopened {ticket.reopenCount} time{ticket.reopenCount > 1 ? 's' : ''}</p>}
+        {ticket.status === 'ON_HOLD' && (
+          <p className="mt-4 inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"><PauseCircle className="h-4 w-4" aria-hidden="true" />On hold — SLA clock paused</p>
+        )}
+        {ticket.status === 'CLOSED' && ticket.closedAt && (
+          <p className="mt-3 text-xs text-slate-500">Closed {new Date(ticket.closedAt).toLocaleString()}{ticket.closeReason ? ` (${humanize(ticket.closeReason).toLowerCase()})` : ''}</p>
+        )}
+        {ticket.reopenCount > 0 && <p className="mt-1 text-xs text-orange-600">Reopened {ticket.reopenCount} time{ticket.reopenCount > 1 ? 's' : ''}</p>}
 
         {actions.length > 0 && (
-          <div className="flex flex-col gap-3 mb-6 border-t border-slate-100 pt-4">
-            {actions.includes('resolve') && (
-              <form onSubmit={(e) => { e.preventDefault(); runAction('resolve', { resolutionSummary }) }} className="flex gap-2">
-                <input className={styles.input} placeholder="Resolution summary…" required
-                  value={resolutionSummary} onChange={(e) => setResolutionSummary(e.target.value)} />
-                <button className={styles.btnPrimary} type="submit">Resolve</button>
-              </form>
-            )}
-
-            {actions.some((a) => ASSIGN_ACTIONS.includes(a)) && suggested[0] && (
-              <p className="text-sm text-slate-600" data-testid="suggestion">
-                Suggested: <strong>{suggested[0].firstName} {suggested[0].lastName}</strong>
-                {' '}({suggested[0].openTickets} open{suggested[0].matchedSkills.length > 0 ? `, skills: ${suggested[0].matchedSkills.join(', ')}` : ''})
-                {technicianPick !== suggested[0]._id && <button type="button" className={styles.btnLink + ' ml-2'} onClick={() => setTechnicianPick(suggested[0]._id)}>Use suggestion</button>}
-              </p>
-            )}
-            {actions.filter((a) => ASSIGN_ACTIONS.includes(a)).map((action) => (
-              <form key={action} onSubmit={(e) => { e.preventDefault(); if (!technicianPick) return toast.error('Pick a technician first'); runAction(action, { technicianId: technicianPick }) }} className="flex gap-2">
-                <select className={styles.select} value={technicianPick} onChange={(e) => setTechnicianPick(e.target.value)}>
-                  <option value="">Select technician…</option>
-                  {technicians.map((t) => <option key={t._id} value={t._id}>{t.firstName} {t.lastName}{Number.isInteger(t.openTickets) ? ` (${t.openTickets} open)` : ''}</option>)}
-                </select>
-                <button className={styles.btnPrimary} type="submit">{ACTION_LABELS[action]}</button>
-              </form>
-            ))}
-
-            {actions.filter((a) => NOTE_REQUIRED_ACTIONS.includes(a)).map((action) => (
-              <form key={action} onSubmit={(e) => { e.preventDefault(); const value = noteDrafts[action]; if (!value?.trim()) return toast.error('A note is required'); runAction(action, { note: value }) }} className="flex gap-2">
-                <input className={styles.input} placeholder={`Reason for ${ACTION_LABELS[action].toLowerCase()}…`}
-                  value={noteDrafts[action] || ''} onChange={(e) => setNoteDrafts((d) => ({ ...d, [action]: e.target.value }))} />
-                <button className={action === 'cancel' || action === 'reject' ? styles.btnDanger : styles.btnSecondary} type="submit">
-                  {ACTION_LABELS[action]}
+          <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4" role="group" aria-label="Ticket actions">
+            {[...actions].sort((a, b) => (a === primaryAction ? -1 : b === primaryAction ? 1 : 0)).map((action) => {
+              const Icon = ACTION_ICONS[action]
+              return (
+                <button key={action} type="button" className={buttonClass(action)} disabled={busy} onClick={() => startAction(action)}>
+                  {Icon && <Icon className="h-4 w-4" aria-hidden="true" />}{ACTION_LABELS[action]}
                 </button>
-              </form>
-            ))}
-
-            {simpleActions.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {simpleActions.map((action) => (
-                  <button key={action} className={styles.btnSecondary} onClick={() => runAction(action)}>
-                    {ACTION_LABELS[action]}
-                  </button>
-                ))}
-              </div>
-            )}
+              )
+            })}
           </div>
-        )}
-
-        {ticket.resolution?.summary && ['RESOLVED', 'CLOSED'].includes(ticket.status) && (
-          <div className="mb-6 border-t border-slate-100 pt-4" data-testid="resolution-summary">
-            <h2 className={styles.h2}>Resolution</h2>
-            <p className="text-sm text-slate-700 whitespace-pre-wrap">{ticket.resolution.summary}</p>
-            {ticket.resolution.resolvedAt && <p className="text-xs text-slate-400 mt-1">Resolved {new Date(ticket.resolution.resolvedAt).toLocaleString()}</p>}
-          </div>
-        )}
-
-        <CsatPanel ticket={ticket} isRequester={isRequester} onSaved={load} />
-        <RelatedAssetPanel ticket={ticket} user={user} onChanged={load} />
-        {isStaff && <WorkLogPanel ticket={ticket} canAdd={user.role === 'TECHNICIAN' && isAssignee && !isFinished} onChanged={() => setReloadKey((n) => n + 1)} />}
-        {user.role === 'ADMIN' && <AuditPanel ticket={ticket} />}
-
-        {isStaff && <SimilarPanel ticket={ticket} />}
-
-        {isStaff && kbSuggestions && (kbSuggestions.articles?.length > 0 || kbSuggestions.source === 'ai') && (
-          <div className="mb-6 border-t border-slate-100 pt-4" data-testid="kb-suggestions">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className={styles.h2 + ' mb-0'}>
-                Suggested knowledge base articles{' '}
-                <span className={`${styles.badge} ${kbSuggestions.source === 'ai' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
-                  {kbSuggestions.source === 'ai' ? '✨ AI-ranked' : 'Text match'}
-                </span>
-              </h2>
-              <button type="button" className={styles.btnLink} disabled={kbRefreshing} onClick={() => loadKbSuggestions(true)}>
-                {kbRefreshing ? 'Refreshing…' : 'Refresh'}
-              </button>
-            </div>
-            {kbSuggestions.articles.length === 0 && <p className="text-sm text-slate-500">{kbSuggestions.source === 'ai' ? 'The AI found no helpful article for this ticket. Refresh to ask again.' : 'No matching article found for this ticket.'}</p>}
-            <ul className="space-y-2">
-              {kbSuggestions.articles.map((a) => (
-                <li key={a._id}>
-                  <Link to={`/kb/${a.publicId}`} className="block rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-indigo-700">{a.title}</p>
-                      {typeof a.relevance === 'number' && <span className="text-xs font-medium text-slate-500 whitespace-nowrap">{a.relevance}% match</span>}
-                    </div>
-                    <p className="text-xs text-slate-500">{a.why || a.summary}</p>
-                    {a.steps?.length > 0 && (
-                      <ol className="mt-2 list-decimal list-inside text-xs text-slate-600 space-y-0.5">
-                        {a.steps.map((st, i) => <li key={i}>{st}</li>)}
-                      </ol>
-                    )}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-            {kbSuggestions.cached && kbSuggestions.generatedAt && (
-              <p className="mt-2 text-xs text-slate-400">Saved {new Date(kbSuggestions.generatedAt).toLocaleString()}. Refresh to ask again.</p>
-            )}
-          </div>
-        )}
-
-        <h2 className={styles.h2}>Timeline & comments</h2>
-        <TimelinePanel ticket={ticket} reloadKey={reloadKey} />
-
-        {isFinished ? (
-          <p className="text-sm text-slate-400">This ticket is {ticket.status.toLowerCase()}, so no more comments can be added.</p>
-        ) : (
-          <form onSubmit={addComment} className="space-y-2">
-            <textarea className={styles.textarea} maxLength={2000} placeholder={internalOnly ? 'Add an internal note…' : 'Add a comment…'} value={commentText} onChange={(e) => setCommentText(e.target.value)} />
-            <div className="flex items-center justify-between">
-              {isStaff && (
-                <label className="flex items-center gap-2 text-sm text-slate-600">
-                  <input type="checkbox" checked={internalOnly || isInternal} disabled={internalOnly} onChange={(e) => setIsInternal(e.target.checked)} />
-                  {internalOnly ? 'Internal note (only the assigned technician or a manager can reply publicly)' : 'Internal note (hidden from requester)'}
-                </label>
-              )}
-              <button className={styles.btnPrimary} type="submit">Post comment</button>
-            </div>
-          </form>
         )}
       </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* main column: the story of the ticket */}
+        <div className="space-y-6 lg:col-span-2 min-w-0">
+          <section className={styles.card} aria-label="Description">
+            <h2 className={styles.h2 + ' flex items-center gap-2'}><FileText className="h-4 w-4 text-slate-400" aria-hidden="true" />Description</h2>
+            <p className="text-slate-700 whitespace-pre-wrap break-words">{ticket.description}</p>
+          </section>
+
+          {ticket.resolution?.summary && ['RESOLVED', 'CLOSED'].includes(ticket.status) && (
+            <section className={styles.card + ' border-teal-200 bg-teal-50/40'} data-testid="resolution-summary" aria-label="Resolution">
+              <h2 className={styles.h2 + ' flex items-center gap-2'}><CheckCircle2 className="h-4 w-4 text-teal-600" aria-hidden="true" />Resolution</h2>
+              <p className="text-sm text-slate-700 whitespace-pre-wrap">{ticket.resolution.summary}</p>
+              {ticket.resolution.resolvedAt && <p className="text-xs text-slate-500 mt-2">Resolved {new Date(ticket.resolution.resolvedAt).toLocaleString()}</p>}
+            </section>
+          )}
+
+          <CsatPanel ticket={ticket} isRequester={isRequester} onSaved={load} />
+
+          <section className={styles.card} aria-label="Timeline and comments">
+            <h2 className={styles.h2 + ' flex items-center gap-2 mb-4'}><MessageSquare className="h-4 w-4 text-slate-400" aria-hidden="true" />Timeline &amp; comments</h2>
+            <TimelinePanel ticket={ticket} reloadKey={reloadKey} />
+
+            {isFinished ? (
+              <p className="text-sm text-slate-500 border-t border-slate-100 pt-4">This ticket is {ticket.status.toLowerCase()}, so no more comments can be added.</p>
+            ) : (
+              <form onSubmit={addComment} className="space-y-2 border-t border-slate-100 pt-4">
+                <div className="flex gap-3">
+                  <Avatar user={user} />
+                  <textarea className={styles.textarea} maxLength={2000} aria-label={internalOnly ? 'Internal note' : 'Comment'} placeholder={internalOnly ? 'Add an internal note…' : 'Add a comment…'} value={commentText} onChange={(e) => setCommentText(e.target.value)} />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 sm:pl-11">
+                  {isStaff ? (
+                    <label className="flex items-center gap-2 text-sm text-slate-600">
+                      <input type="checkbox" className={styles.checkbox} checked={internalOnly || isInternal} disabled={internalOnly} onChange={(e) => setIsInternal(e.target.checked)} />
+                      <Lock className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" />
+                      {internalOnly ? 'Internal note (only the assigned technician or a manager can reply publicly)' : 'Internal note (hidden from requester)'}
+                    </label>
+                  ) : <span />}
+                  <button className={styles.btnPrimary} type="submit"><Send className="h-4 w-4" aria-hidden="true" />Post comment</button>
+                </div>
+              </form>
+            )}
+          </section>
+
+          {isStaff && <WorkLogPanel ticket={ticket} canAdd={user.role === 'TECHNICIAN' && isAssignee && !isFinished} onChanged={() => setReloadKey((n) => n + 1)} />}
+          {user.role === 'ADMIN' && <AuditPanel ticket={ticket} />}
+        </div>
+
+        {/* side column: the facts, and help for the people working on it */}
+        <aside className="space-y-6 min-w-0" aria-label="Ticket details">
+          <section className={styles.card} aria-label="Details">
+            <h2 className={styles.h2}>Details</h2>
+            <div className="divide-y divide-slate-100">
+              <DetailRow icon={Clock} label="SLA">
+                {sla ? <span className={`${styles.badge} ${sla.className}`}>{sla.label}</span> : <span className="text-slate-400">No clock running</span>}
+                {sla && sla.label !== 'On hold' && ticket.sla?.resolutionDueAt && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    {formatSlaCountdown(ticket.sla.resolutionDueAt)} to resolve
+                    <span className="block text-slate-400">Due {new Date(ticket.sla.resolutionDueAt).toLocaleString()}</span>
+                  </p>
+                )}
+              </DetailRow>
+              <DetailRow icon={Flag} label="Priority">
+                <PriorityBadge priority={ticket.priority} />
+                {canChangePriority && (
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    <select className={styles.select + ' max-w-[11rem]'} aria-label="Change priority" value={priorityPick} onChange={(e) => setPriorityPick(e.target.value)}>
+                      <option value="">Change priority…</option>
+                      {priorities.filter((p) => p.priority !== ticket.priority).map((p) => <option key={p._id} value={p.priority}>{p.label}</option>)}
+                    </select>
+                    {priorityPick && <button className={styles.btnSecondary} onClick={changePriority}>Apply</button>}
+                  </div>
+                )}
+              </DetailRow>
+              <DetailRow icon={UserRound} label="Requester">{fullName(ticket.requester) || '—'}</DetailRow>
+              <DetailRow icon={UserCheck} label="Assigned to">
+                {ticket.assignedTo
+                  ? <>{fullName(ticket.assignedTo)}{ASSIGN_METHOD[ticket.assignmentMethod] && <span className="block text-xs text-slate-500">{ASSIGN_METHOD[ticket.assignmentMethod]}</span>}</>
+                  : <span className="text-slate-400">Unassigned</span>}
+              </DetailRow>
+              <DetailRow icon={Folder} label="Category">{ticket.category?.name ?? '—'}{ticket.category?.ticketType && <span className="block text-xs text-slate-500">{humanize(ticket.category.ticketType)}</span>}</DetailRow>
+              <DetailRow icon={CalendarDays} label="Created">{new Date(ticket.createdAt).toLocaleString()}</DetailRow>
+            </div>
+          </section>
+
+          <RelatedAssetPanel ticket={ticket} user={user} onChanged={load} />
+
+          {isStaff && kbSuggestions && (kbSuggestions.articles?.length > 0 || kbSuggestions.source === 'ai') && (
+            <section className={styles.card} data-testid="kb-suggestions" aria-label="Suggested knowledge base articles">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h2 className={styles.h2 + ' mb-0 flex items-center gap-2'}><BookOpen className="h-4 w-4 text-slate-400" aria-hidden="true" />Suggested articles</h2>
+                <button type="button" className={styles.btnLink + ' inline-flex items-center gap-1'} disabled={kbRefreshing} onClick={() => loadKbSuggestions(true)}>
+                  <RefreshCw className={`h-3.5 w-3.5 ${kbRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />{kbRefreshing ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
+              <span className={`${styles.badge} gap-1 mb-3 ${kbSuggestions.source === 'ai' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+                {kbSuggestions.source === 'ai' ? <><Sparkles className="h-3 w-3" aria-hidden="true" />AI-ranked</> : 'Text match'}
+              </span>
+              {kbSuggestions.articles.length === 0 && <p className="text-sm text-slate-500">{kbSuggestions.source === 'ai' ? 'The AI found no helpful article for this ticket. Refresh to ask again.' : 'No matching article found for this ticket.'}</p>}
+              <ul className="space-y-2">
+                {kbSuggestions.articles.map((a) => (
+                  <li key={a._id}>
+                    <Link to={`/kb/${a.publicId}`} className="block rounded-lg border border-slate-200 p-3 hover:border-indigo-200 hover:bg-indigo-50/30 transition">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium text-indigo-700">{a.title}</p>
+                        {typeof a.relevance === 'number' && <span className="text-xs font-medium text-slate-500 whitespace-nowrap">{a.relevance}% match</span>}
+                      </div>
+                      <p className="text-xs text-slate-500">{a.why || a.summary}</p>
+                      {a.steps?.length > 0 && (
+                        <ol className="mt-2 list-decimal list-inside text-xs text-slate-600 space-y-0.5">
+                          {a.steps.map((st, i) => <li key={i}>{st}</li>)}
+                        </ol>
+                      )}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              {kbSuggestions.cached && kbSuggestions.generatedAt && (
+                <p className="mt-2 text-xs text-slate-400">Saved {new Date(kbSuggestions.generatedAt).toLocaleString()}. Refresh to ask again.</p>
+              )}
+            </section>
+          )}
+
+          {isStaff && <SimilarPanel ticket={ticket} />}
+        </aside>
+      </div>
+
+      {/* the dialog for actions that need input */}
+      {dialog && (
+        <Modal title={ASSIGN_ACTIONS.includes(dialog) ? `${ACTION_LABELS[dialog]} ticket` : dialogText.title} onClose={() => setDialog(null)}>
+          <form onSubmit={submitDialog} noValidate>
+            {ASSIGN_ACTIONS.includes(dialog) ? (
+              <>
+                {suggested[0] && (
+                  <p className="text-sm text-slate-600 mb-3 rounded-lg bg-indigo-50 border border-indigo-100 px-3 py-2" data-testid="suggestion">
+                    Suggested: <strong>{suggested[0].firstName} {suggested[0].lastName}</strong>
+                    {' '}({suggested[0].openTickets} open{suggested[0].matchedSkills.length > 0 ? `, skills: ${suggested[0].matchedSkills.join(', ')}` : ''})
+                    {technicianPick !== suggested[0]._id && <button type="button" className={styles.btnLink + ' ml-2'} onClick={() => setTechnicianPick(suggested[0]._id)}>Use suggestion</button>}
+                  </p>
+                )}
+                <label className="block">
+                  <span className={styles.label}>Technician</span>
+                  <select className={styles.select} value={technicianPick} onChange={(e) => setTechnicianPick(e.target.value)} autoFocus>
+                    <option value="">Select technician…</option>
+                    {technicians.map((t) => <option key={t._id} value={t._id}>{t.firstName} {t.lastName}{Number.isInteger(t.openTickets) ? ` (${t.openTickets} open)` : ''}</option>)}
+                  </select>
+                </label>
+              </>
+            ) : (
+              <label className="block">
+                <span className={styles.label}>{dialogText.label}</span>
+                <textarea className={styles.textarea} autoFocus placeholder={dialogText.placeholder}
+                  value={dialog === 'resolve' ? resolutionSummary : (noteDrafts[dialog] || '')}
+                  onChange={(e) => (dialog === 'resolve' ? setResolutionSummary(e.target.value) : setNoteDrafts((d) => ({ ...d, [dialog]: e.target.value })))} />
+                {dialogText.hint && <span className="block text-xs text-slate-500 mt-1">{dialogText.hint}</span>}
+              </label>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" className={styles.btnSecondary} onClick={() => setDialog(null)}>Back</button>
+              <button type="submit" className={DANGER_ACTIONS.includes(dialog) ? styles.btnDanger : styles.btnPrimary} disabled={busy}>
+                {busy ? 'Working…' : ACTION_LABELS[dialog]}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   )
 }

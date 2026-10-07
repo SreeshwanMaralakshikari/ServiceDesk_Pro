@@ -1,15 +1,17 @@
 import { Link } from 'react-router-dom'
+import { AlertTriangle } from 'lucide-react'
 import { useFetch } from '../../hooks/useFetch.js'
-import { Spinner } from '../common/Spinner.jsx'
+import { StatSkeleton } from '../common/Skeleton.jsx'
+import { ErrorState } from '../common/ErrorState.jsx'
 import { StatusBadge, PriorityBadge } from '../common/Badges.jsx'
 import { styles } from '../../styles/common.js'
 import { pct } from '../reports/DashboardView.jsx'
 
 export const AdminDashboard = () => {
-  const { data: stats, loading, error } = useFetch('/admin-api/dashboard')
+  const { data: stats, loading, error, reload } = useFetch('/admin-api/dashboard')
 
-  if (loading) return <Spinner />
-  if (error) return <p className="text-red-600 text-sm">{error}</p>
+  if (loading && !stats) return <StatSkeleton />
+  if (error) return <div className={styles.card}><ErrorState message={error} onRetry={reload} /></div>
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div className={styles.card}><p className="text-slate-500 text-sm">Total tickets</p><p className="text-2xl font-semibold">{stats.totalTickets}</p></div>
@@ -31,7 +33,7 @@ export const AdminDashboard = () => {
         <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
           <span>Response SLA met: <b>{pct(stats.overview.sla.response.compliance)}</b></span>
           <span>Resolution SLA met: <b>{pct(stats.overview.sla.resolution.compliance)}</b></span>
-          <span>Breached now: <b className={stats.overview.sla.current.breached ? 'text-red-700' : ''}>{stats.overview.sla.current.breached ? '⚠ ' : ''}{stats.overview.sla.current.breached}</b></span>
+          <span>Breached now: <b className={stats.overview.sla.current.breached ? 'inline-flex items-center gap-1 text-red-700' : ''}>{stats.overview.sla.current.breached ? <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" /> : null}{stats.overview.sla.current.breached}</b></span>
           <span>Unassigned: <b>{stats.overview.sla.current.unassigned}</b></span>
           <span>CSAT: <b>{stats.overview.csat.average === null ? '—' : `${stats.overview.csat.average} / 5`}</b> ({stats.overview.csat.count})</span>
         </div>

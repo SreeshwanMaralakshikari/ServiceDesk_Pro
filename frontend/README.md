@@ -64,7 +64,10 @@ frontend/
     ├── axiosInstance.js     the one API client: cookie, timeout, one retry, waking banner
     ├── index.css            Tailwind import and the chart colours
     ├── components/
-    │   ├── *.jsx            layout, header, route guard, home, login, register, 403, 404
+    │   ├── *.jsx            root layout, public header, route guard, home, login, register, 403, 404
+    │   ├── layout/          signed-in frame: sidebar, top bar, user menu, mobile drawer, navConfig.js
+    │   ├── home/            the public landing page and the signed-in start page
+    │   ├── auth/            the split-screen layout shared by login and register
     │   ├── tickets/         list, create, detail, and the panels shown on a ticket
     │   ├── tech/            the technician's queue and dashboard
     │   ├── reports/         team dashboard, ticket report, CSV download
@@ -74,12 +77,13 @@ frontend/
     │   ├── notifications/   the bell and the notifications page
     │   ├── admin/           users, departments, categories, SLA, settings, audit log
     │   ├── account/         change password
-    │   └── common/          DataTable, Modal, ConfirmModal, Field, TagInput, Badges,
-    │                        Spinner, EmptyState, WakingBanner, and charts/
+    │   └── common/          DataTable, Modal, ConfirmModal, Field, TagInput, Badges, PasswordInput,
+    │                        Spinner, Skeleton, EmptyState, ErrorState, NotFoundState,
+    │                        WakingBanner, and charts/
     ├── hooks/useFetch.js    reads data and cancels stale requests
     ├── store/               authStore.js (who is signed in), networkStore.js (slow requests)
     ├── styles/common.js     every reusable Tailwind class string
-    └── utils/               errors.js, actions.js, sla.js
+    └── utils/               errors.js, actions.js, sla.js, labels.js (readable names for API codes)
 ```
 
 ## Pages and who can open them
@@ -88,9 +92,9 @@ The routes live in `src/App.jsx`. A page's role list matches the roles the backe
 
 | Path | Page | Who |
 |---|---|---|
-| `/` | Home: login and register links, or links to My Tickets and the role's dashboard | Everyone |
+| `/` | Signed out: the product landing page. Signed in: a start page with what needs attention and shortcuts for the role | Everyone |
 | `/login`, `/register` | Sign in, create an employee account | Everyone |
-| `/tickets`, `/tickets/:ticketId` | Ticket list and ticket detail | Every signed-in role |
+| `/tickets`, `/tickets/:ticketId` | Ticket list (`?status=RESOLVED` opens it filtered) and ticket detail | Every signed-in role |
 | `/notifications` | All notifications | Every signed-in role |
 | `/account/password` | Change password | Every signed-in role |
 | `/my-assets` | Assets assigned to me | Every signed-in role |
@@ -117,14 +121,17 @@ Where to find the helpers:
 | Load data for a page | `useFetch(url, params)` | `hooks/useFetch.js` |
 | Show an error message | `getErrorMessage(err, fallback)` | `utils/errors.js` |
 | Run a write and show a toast | `runAction(request, successMessage)` | `utils/actions.js` |
-| Show a paged list | `DataTable` | `components/common/DataTable.jsx` |
+| Show a paged list (with loading, empty and error states) | `DataTable` | `components/common/DataTable.jsx` |
+| Show a status, priority or role | `StatusBadge`, `PriorityBadge`, `RoleBadge` … | `components/common/Badges.jsx` |
+| Turn an API code into text (`IN_PROGRESS` → "In progress") | `statusLabel`, `roleLabel`, `humanize` … | `utils/labels.js` |
 | Download a CSV | `downloadCsv(url, params, fallbackName)` | `components/reports/downloadCsv.js` |
 | Show an SLA badge | `getSlaStatus(ticket)` | `utils/sla.js` |
 
 ## Sign-in and role checks
 
 - **`store/authStore.js`** holds `user`, `isAuthenticated` and `isChecking`, and the `checkAuth`, `login` and `logout` actions. A counter makes sure a slow `checkAuth` answer can never undo a login or logout that happened after it started.
-- **`RootLayout.jsx`** calls `checkAuth()` (`GET /auth/check-auth`) once when the app loads, and shows "Loading…" until it answers.
+- **`RootLayout.jsx`** calls `checkAuth()` (`GET /auth/check-auth`) once when the app loads, and shows a loading screen until it answers. Signed-in users then get the sidebar layout (`layout/AppShell.jsx`); signed-out visitors get the simple top bar (`Header.jsx`).
+- **`layout/navConfig.js`** is the one list of menu links and the roles that see each one. The sidebar and the home page both read it, and its roles must match the `ProtectedRoutes` blocks in `App.jsx`.
 - **`ProtectedRoutes.jsx`** sends a visitor to `/login`, and a signed-in user with the wrong role to `/unauthorized`.
 - These checks only decide what the app shows. **The backend checks the role again on every request**, so hiding a page is never the only protection.
 
@@ -133,13 +140,16 @@ Where to find the helpers:
 - **Tailwind CSS 4**, loaded by `@import "tailwindcss"` in `src/index.css`. There is no `tailwind.config.js`.
 - **`src/styles/common.js`** holds every reusable class string (`styles.card`, `styles.btnPrimary`, `styles.input`, `styles.table` ...). Use these instead of repeating long class lists, so the look stays consistent.
 - **Palette:** indigo for actions and links, slate for text and surfaces, red for danger. The chart colours are CSS variables in `index.css`.
+- **Icons:** [lucide-react](https://lucide.dev/icons/). Import each icon by name (`import { Ticket } from 'lucide-react'`) and mark decorative ones `aria-hidden="true"`.
+- **States:** lists use `DataTable`, which shows a skeleton while loading, `ErrorState` (with a retry button when you pass `onRetry`) and `EmptyState` (pass `emptyIcon` and `emptyAction`). Detail pages use `PageSkeleton` and `NotFoundState`.
+- **Phones:** wide tables scroll inside their card; give less important columns `className: 'hidden md:table-cell'` in the `DataTable` columns.
 - The app is light-themed only.
 
 ## Adding a page
 
 1. Create the component under `src/components/<area>/`.
 2. Add its route to `src/App.jsx`, inside the `ProtectedRoutes` block whose roles **match the backend's roles** for the routes the page calls.
-3. Add a link in `Header.jsx` for the same roles, if the page belongs in the menu.
+3. Add a link in `components/layout/navConfig.js` for the same roles, if the page belongs in the menu.
 4. Read with `useFetch`, write with `axiosInstance` (or `runAction`), show errors with `getErrorMessage`.
 5. From `backend/`, run `npm run docs` to update the [Frontend ↔ API guide](../docs/Frontend_API_Integration_Guide.md), then run the checks below.
 
